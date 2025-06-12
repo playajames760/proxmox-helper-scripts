@@ -114,18 +114,46 @@ check_storage_space() {
     local storage_pool="$1"
     local required_gb="$2"
     
-    if ! pvesm status "$storage_pool" &>/dev/null; then
-        msg_error "Storage pool '$storage_pool' not found"
+    # Check if storage pool exists
+    if ! pvesm status | grep -q "^${storage_pool}"; then
+        msg_error "Storage pool '$storage_pool' not found. Available pools: $(pvesm status | awk 'NR>1 {print $1}' | tr '\n' ' ')"
     fi
     
-    local available_gb
-    available_gb=$(pvesm status "$storage_pool" -content rootdir | awk 'NR==2 {print int($4/1024/1024/1024)}')
+    # Check if storage supports rootdir content
+    local storage_content
+    storage_content=$(pvesm status | awk -v pool="$storage_pool" '$1 == pool {print $6}')
+    if [[ ! "$storage_content" =~ rootdir ]]; then
+        msg_error "Storage pool '$storage_pool' does not support containers (rootdir content). Content types: $storage_content"
+    fi
+    
+    # Get available space - handle different storage types
+    local available_gb total_gb
+    local storage_info
+    storage_info=$(pvesm status | awk -v pool="$storage_pool" '$1 == pool {print $4, $5}')
+    
+    if [[ -n "$storage_info" ]]; then
+        # Parse total and used space
+        local total_bytes used_bytes
+        total_bytes=$(echo "$storage_info" | awk '{print $1}')
+        used_bytes=$(echo "$storage_info" | awk '{print $2}')
+        
+        if [[ -n "$total_bytes" && -n "$used_bytes" ]]; then
+            total_gb=$((total_bytes / 1024 / 1024 / 1024))
+            available_gb=$(((total_bytes - used_bytes) / 1024 / 1024 / 1024))
+        else
+            msg_warn "Could not parse storage space for '$storage_pool', assuming sufficient space"
+            return 0
+        fi
+    else
+        msg_warn "Could not get storage info for '$storage_pool', assuming sufficient space"
+        return 0
+    fi
     
     if [[ $available_gb -lt $required_gb ]]; then
-        msg_error "Insufficient storage in '$storage_pool': need ${required_gb}GB, have ${available_gb}GB"
+        msg_error "Insufficient storage in '$storage_pool': need ${required_gb}GB, have ${available_gb}GB available (${total_gb}GB total)"
     fi
     
-    msg_ok "Storage validated: ${available_gb}GB available in '$storage_pool'"
+    msg_ok "Storage validated: ${available_gb}GB available in '$storage_pool' (${total_gb}GB total)"
 }
 
 check_memory_available() {
@@ -433,7 +461,8 @@ get_next_vmid() {
 }
 
 get_storage_pools() {
-    pvesm status -content rootdir | awk 'NR>1 && $1!="local" {print $1}' | head -5
+    # Get all storage pools that support rootdir content (containers)
+    pvesm status | awk 'NR>1 && $6 ~ /rootdir/ {print $1}' | head -10
 }
 
 get_network_bridges() {
