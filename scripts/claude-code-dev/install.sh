@@ -189,23 +189,43 @@ create_container() {
     INSTALLATION_STAGE="Creating Container"
     section_header "Creating Container"
     
-    # Download template if needed
-    start_spinner "Checking Ubuntu 22.04 template..."
-    local template_name="ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
+    # Get available templates first
+    status_indicator "running" "Checking available templates..."
+    local available_templates
+    available_templates=$(pveam available | grep ubuntu-22.04 | head -1 | awk '{print $2}')
+    
+    if [[ -z "$available_templates" ]]; then
+        msg_error "No Ubuntu 22.04 templates found. Please check your internet connection."
+    fi
+    
+    local template_name="$available_templates"
     local template_path="/var/lib/vz/template/cache/$template_name"
     
+    msg_info "Using template: $template_name"
+    
+    # Download template if needed
     if [[ ! -f "$template_path" ]]; then
-        stop_spinner
-        status_indicator "running" "Downloading Ubuntu 22.04 template"
+        status_indicator "running" "Updating template list..."
         
-        # Update template list with timeout
-        if ! timeout 60 pveam update; then
-            msg_error "Failed to update template list (timeout)"
+        # Update template list with timeout and proper error handling
+        local update_output
+        update_output=$(timeout 60 pveam update 2>&1)
+        local update_result=$?
+        
+        if [[ $update_result -ne 0 ]]; then
+            msg_error "Failed to update template list: $update_output"
         fi
         
-        # Download template with timeout
-        if ! timeout 300 pveam download local "$template_name"; then
-            msg_error "Failed to download template (timeout or network error)"
+        status_indicator "success" "Template list updated"
+        status_indicator "running" "Downloading Ubuntu 22.04 template (this may take a few minutes)..."
+        
+        # Download template with timeout and progress
+        local download_output
+        download_output=$(timeout 600 pveam download local "$template_name" 2>&1)
+        local download_result=$?
+        
+        if [[ $download_result -ne 0 ]]; then
+            msg_error "Failed to download template: $download_output"
         fi
         
         # Verify template downloaded
@@ -213,20 +233,20 @@ create_container() {
             msg_error "Template file not found after download: $template_path"
         fi
         
-        msg_success "Template downloaded"
+        msg_success "Template downloaded successfully"
     else
-        stop_spinner
-        msg_success "Template ready"
+        msg_success "Template already available"
     fi
     
-    # Create container
-    start_spinner "Creating container ${CONFIG["Container ID"]}..."
+    # Create container with detailed progress
+    status_indicator "running" "Creating container ${CONFIG["Container ID"]} with ${CONFIG["CPU Cores"]} cores, ${CONFIG["RAM (MB)"]}MB RAM..."
     
     # Build command with proper error handling
     local create_result
     local create_output
     
-    create_output=$(pct create "${CONFIG["Container ID"]}" "$template_path" \
+    # Execute container creation with timeout
+    create_output=$(timeout 120 pct create "${CONFIG["Container ID"]}" "$template_path" \
         --hostname "${CONFIG["Container Name"]}" \
         --cores "${CONFIG["CPU Cores"]}" \
         --memory "${CONFIG["RAM (MB)"]}" \
@@ -236,20 +256,30 @@ create_container() {
         --features "keyctl=1,nesting=1,fuse=1" \
         --ostype ubuntu \
         --onboot 1 \
-        --start 1 2>&1)
+        --start 0 2>&1)
     create_result=$?
     
-    stop_spinner
-    
     if [[ $create_result -ne 0 ]]; then
-        msg_error "Failed to create container. Error: $create_output"
+        msg_error "Failed to create container (exit code: $create_result). Error: $create_output"
     fi
     
-    msg_success "Container created successfully"
+    status_indicator "success" "Container created successfully"
+    
+    # Start container separately with proper error handling
+    status_indicator "running" "Starting container..."
+    local start_output
+    start_output=$(timeout 60 pct start "${CONFIG["Container ID"]}" 2>&1)
+    local start_result=$?
+    
+    if [[ $start_result -ne 0 ]]; then
+        msg_error "Failed to start container: $start_output"
+    fi
+    
+    status_indicator "success" "Container started successfully"
     
     # Create development volume
     if [[ "${FEATURES["Development Volume"]}" == "yes" ]]; then
-        status_indicator "running" "Creating development volume (${DEV_VOLUME_SIZE}GB)"
+        status_indicator "running" "Creating development volume (${DEV_VOLUME_SIZE}GB)..."
         
         local volume_result
         local volume_output
@@ -259,29 +289,27 @@ create_container() {
         if [[ $volume_result -ne 0 ]]; then
             msg_warn "Failed to create development volume: $volume_output"
         else
-            msg_success "Development volume created"
+            status_indicator "success" "Development volume created"
         fi
     fi
 }
 
 # Wait for container to be ready
 wait_for_container() {
-    start_spinner "Waiting for container to be ready..."
+    status_indicator "running" "Waiting for container to be ready..."
     
     local timeout=60
     local count=0
     
     while ! pct exec "${CONFIG["Container ID"]}" -- test -f /bin/bash 2>/dev/null; do
         if [[ $count -ge $timeout ]]; then
-            stop_spinner
             msg_error "Container failed to become ready within $timeout seconds"
         fi
         sleep 1
         ((count++))
     done
     
-    stop_spinner
-    msg_success "Container is ready"
+    status_indicator "success" "Container is ready"
 }
 
 # Setup container with visual feedback
@@ -290,18 +318,16 @@ setup_container() {
     section_header "Container Setup"
     
     # Wait for network
-    start_spinner "Waiting for network..."
+    status_indicator "running" "Waiting for network connectivity..."
     local count=0
-    while ! pct exec "${CONFIG["Container ID"]}" -- ping -c1 google.com &>/dev/null; do
+    while ! pct exec "${CONFIG["Container ID"]}" -- ping -c1 8.8.8.8 &>/dev/null; do
         sleep 2
         ((count++))
         if [[ $count -gt 30 ]]; then
-            stop_spinner
-            msg_error "Network timeout"
+            msg_error "Network timeout (60 seconds). Check network configuration."
         fi
     done
-    stop_spinner
-    msg_success "Network ready"
+    status_indicator "success" "Network ready"
     
     # Run setup script with progress
     echo ""
@@ -417,18 +443,33 @@ Start container: pct start ${CONFIG["Container ID"]}"
 
 # Error handling with cleanup
 cleanup_on_error() {
+    local exit_code=$?
+    
+    # Stop any running spinners
+    stop_spinner 2>/dev/null || true
+    
+    echo ""
+    msg_error "Installation failed at stage: ${INSTALLATION_STAGE} (exit code: $exit_code)"
+    
     if [[ -n "${CONFIG["Container ID"]}" ]] && pct status "${CONFIG["Container ID"]}" &>/dev/null; then
-        echo ""
-        msg_warn "Installation failed at stage: ${INSTALLATION_STAGE}"
-        if prompt_yes_no "Remove failed container?" "yes"; then
+        if prompt_yes_no "Remove failed container ${CONFIG["Container ID"]}?" "yes"; then
+            status_indicator "running" "Cleaning up failed container..."
             pct stop "${CONFIG["Container ID"]}" 2>/dev/null || true
+            sleep 2
             pct destroy "${CONFIG["Container ID"]}" 2>/dev/null || true
-            msg_info "Container removed"
+            status_indicator "success" "Container removed"
         fi
     fi
+    exit $exit_code
+}
+
+# Cleanup on script termination
+cleanup_on_exit() {
+    stop_spinner 2>/dev/null || true
 }
 
 trap cleanup_on_error ERR
+trap cleanup_on_exit EXIT INT TERM
 
 # Main installation flow
 main() {
