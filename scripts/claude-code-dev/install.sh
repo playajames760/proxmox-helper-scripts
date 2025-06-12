@@ -191,12 +191,28 @@ create_container() {
     
     # Download template if needed
     start_spinner "Checking Ubuntu 22.04 template..."
-    local template_path="/var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
+    local template_name="ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
+    local template_path="/var/lib/vz/template/cache/$template_name"
+    
     if [[ ! -f "$template_path" ]]; then
         stop_spinner
         status_indicator "running" "Downloading Ubuntu 22.04 template"
-        pveam update &>/dev/null
-        pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+        
+        # Update template list with timeout
+        if ! timeout 60 pveam update; then
+            msg_error "Failed to update template list (timeout)"
+        fi
+        
+        # Download template with timeout
+        if ! timeout 300 pveam download local "$template_name"; then
+            msg_error "Failed to download template (timeout or network error)"
+        fi
+        
+        # Verify template downloaded
+        if [[ ! -f "$template_path" ]]; then
+            msg_error "Template file not found after download: $template_path"
+        fi
+        
         msg_success "Template downloaded"
     else
         stop_spinner
@@ -206,31 +222,45 @@ create_container() {
     # Create container
     start_spinner "Creating container ${CONFIG["Container ID"]}..."
     
-    local create_cmd="pct create ${CONFIG["Container ID"]} $template_path \
-        --hostname ${CONFIG["Container Name"]} \
-        --cores ${CONFIG["CPU Cores"]} \
-        --memory ${CONFIG["RAM (MB)"]} \
-        --rootfs ${CONFIG["Storage Pool"]}:${CONFIG["Disk Size (GB)"]} \
-        --net0 name=eth0,bridge=${CONFIG["Network Bridge"]},firewall=1,ip=dhcp,type=veth \
+    # Build command with proper error handling
+    local create_result
+    local create_output
+    
+    create_output=$(pct create "${CONFIG["Container ID"]}" "$template_path" \
+        --hostname "${CONFIG["Container Name"]}" \
+        --cores "${CONFIG["CPU Cores"]}" \
+        --memory "${CONFIG["RAM (MB)"]}" \
+        --rootfs "${CONFIG["Storage Pool"]}:${CONFIG["Disk Size (GB)"]}" \
+        --net0 "name=eth0,bridge=${CONFIG["Network Bridge"]},firewall=1,ip=dhcp,type=veth" \
         --unprivileged 1 \
-        --features keyctl=1,nesting=1,fuse=1 \
+        --features "keyctl=1,nesting=1,fuse=1" \
         --ostype ubuntu \
         --onboot 1 \
-        --start 1"
-    
-    if ! eval "$create_cmd" 2>/dev/null; then
-        stop_spinner
-        msg_error "Failed to create container"
-    fi
+        --start 1 2>&1)
+    create_result=$?
     
     stop_spinner
+    
+    if [[ $create_result -ne 0 ]]; then
+        msg_error "Failed to create container. Error: $create_output"
+    fi
+    
     msg_success "Container created successfully"
     
     # Create development volume
     if [[ "${FEATURES["Development Volume"]}" == "yes" ]]; then
         status_indicator "running" "Creating development volume (${DEV_VOLUME_SIZE}GB)"
-        pct set "${CONFIG["Container ID"]}" -mp0 "${CONFIG["Storage Pool"]}:${DEV_VOLUME_SIZE},mp=/opt/development"
-        msg_success "Development volume created"
+        
+        local volume_result
+        local volume_output
+        volume_output=$(pct set "${CONFIG["Container ID"]}" -mp0 "${CONFIG["Storage Pool"]}:${DEV_VOLUME_SIZE},mp=/opt/development" 2>&1)
+        volume_result=$?
+        
+        if [[ $volume_result -ne 0 ]]; then
+            msg_warn "Failed to create development volume: $volume_output"
+        else
+            msg_success "Development volume created"
+        fi
     fi
 }
 
