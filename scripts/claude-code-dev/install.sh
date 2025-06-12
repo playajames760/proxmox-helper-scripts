@@ -353,17 +353,17 @@ setup_container() {
         progress_bar $i $total_steps
         status_indicator "running" "${steps[$i]}"
         
-        # Execute setup script in background and show progress
+        # Execute setup script with proper error handling
         if [[ $i -eq 0 ]]; then
             # First step - run the actual setup script
-            pct exec "${CONFIG["Container ID"]}" -- bash -c "$env_vars curl -fsSL '$setup_url' | bash" &>/dev/null &
-            local setup_pid=$!
+            local setup_output
+            setup_output=$(pct exec "${CONFIG["Container ID"]}" -- bash -c "$env_vars curl -fsSL '$setup_url' | bash" 2>&1)
+            local setup_result=$?
             
-            # Monitor progress
-            while kill -0 $setup_pid 2>/dev/null; do
-                sleep 1
-            done
-            wait $setup_pid
+            if [[ $setup_result -ne 0 ]]; then
+                echo ""
+                msg_error "Setup script failed: $setup_output"
+            fi
         else
             # Simulate other steps for visual feedback
             sleep 2
@@ -416,15 +416,20 @@ Name: ${CONFIG["Container Name"]}
 IP Address: ${ip}
 Resources: ${CONFIG["CPU Cores"]} vCPU, ${CONFIG["RAM (MB)"]}MB RAM, ${CONFIG["Disk Size (GB)"]}GB Disk"
         
-        ["Access Details"]="SSH: ssh developer@${ip}
-SSH Key: /home/developer/.ssh/id_ed25519$(if [[ "${FEATURES["VS Code Server"]}" == "yes" ]]; then echo "
+        ["Access Details"]="Container Access: pct enter ${CONFIG["Container ID"]} && su - developer
+Direct SSH: ssh developer@${ip} (use generated SSH key)$(if [[ "${FEATURES["VS Code Server"]}" == "yes" ]]; then echo "
 VS Code Server: http://${ip}:8080
 VS Code Password: claude-code-dev-2025"; fi)"
         
-        ["Quick Start"]="1. SSH into container: ssh developer@${ip}
+        ["Quick Start"]="1. Enter container: pct enter ${CONFIG["Container ID"]} && su - developer
 2. Authenticate Claude Code: claude
 3. Start new project: claude-init my-project
 4. Check system health: health-check"
+        
+        ["SSH Key Setup"]="To use SSH key authentication:
+1. Get public key: pct exec ${CONFIG["Container ID"]} -- cat /home/developer/.ssh/id_ed25519.pub
+2. Add to ~/.ssh/authorized_keys on your machine
+3. SSH with: ssh -i <path-to-private-key> developer@${ip}"
         
         ["Useful Commands"]="• claude-init <project> - Initialize new project
 • dev [project] - Navigate to development directory
