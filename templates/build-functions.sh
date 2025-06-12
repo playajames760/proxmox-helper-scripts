@@ -115,13 +115,15 @@ check_storage_space() {
     local required_gb="$2"
     
     # Check if storage pool exists
-    if ! pvesm status | grep -q "^${storage_pool}"; then
-        msg_error "Storage pool '$storage_pool' not found. Available pools: $(pvesm status | awk 'NR>1 {print $1}' | tr '\n' ' ')"
+    if ! pvesm status 2>/dev/null | grep -q "^${storage_pool}"; then
+        local available_pools
+        available_pools=$(pvesm status 2>/dev/null | awk 'NR>1 {print $1}' | tr '\n' ' ')
+        msg_error "Storage pool '$storage_pool' not found. Available pools: $available_pools"
     fi
     
     # Check if storage supports rootdir content
     local storage_content
-    storage_content=$(pvesm status | awk -v pool="$storage_pool" '$1 == pool {print $6}')
+    storage_content=$(pvesm status 2>/dev/null | awk -v pool="$storage_pool" '$1 == pool {print $6}')
     if [[ ! "$storage_content" =~ rootdir ]]; then
         msg_error "Storage pool '$storage_pool' does not support containers (rootdir content). Content types: $storage_content"
     fi
@@ -129,7 +131,7 @@ check_storage_space() {
     # Get available space - handle different storage types
     local available_gb total_gb
     local storage_info
-    storage_info=$(pvesm status | awk -v pool="$storage_pool" '$1 == pool {print $4, $5}')
+    storage_info=$(pvesm status 2>/dev/null | awk -v pool="$storage_pool" '$1 == pool {print $4, $5}')
     
     if [[ -n "$storage_info" ]]; then
         # Parse total and used space
@@ -462,7 +464,34 @@ get_next_vmid() {
 
 get_storage_pools() {
     # Get all storage pools that support rootdir content (containers)
-    pvesm status | awk 'NR>1 && $6 ~ /rootdir/ {print $1}' | head -10
+    # Filter out any that are disabled or have connection issues
+    local pools=()
+    while IFS= read -r line; do
+        local pool_name status
+        pool_name=$(echo "$line" | awk '{print $1}')
+        status=$(echo "$line" | awk '{print $2}')
+        
+        # Skip disabled pools or pools with connection issues
+        if [[ "$status" == "active" ]] && echo "$line" | grep -q "rootdir"; then
+            pools+=("$pool_name")
+        fi
+    done < <(pvesm status 2>/dev/null | awk 'NR>1')
+    
+    # If no pools found via pvesm, fall back to manual detection
+    if [[ ${#pools[@]} -eq 0 ]]; then
+        # Try to detect working storage pools manually
+        for pool in local-lvm utility local; do
+            if pvesm status "$pool" &>/dev/null; then
+                local content
+                content=$(pvesm status "$pool" 2>/dev/null | awk 'NR==2 {print $6}')
+                if [[ "$content" =~ rootdir ]]; then
+                    pools+=("$pool")
+                fi
+            fi
+        done
+    fi
+    
+    printf '%s\n' "${pools[@]}" | head -10
 }
 
 get_network_bridges() {
