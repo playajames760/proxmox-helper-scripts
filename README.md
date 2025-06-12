@@ -91,9 +91,10 @@ High-availability database solutions.
 
 ### 📋 Script Standards
 All scripts follow consistent patterns:
-- Interactive whiptail dialogs for configuration
+- Modern, intuitive UI with sleek visual design
+- Interactive configuration with smart defaults
+- Real-time progress indicators and status updates
 - Comprehensive error handling and validation
-- Progress indicators with colored output
 - Automatic service configuration and health checks
 - Built-in update mechanisms and maintenance tools
 - Detailed logging and troubleshooting support
@@ -191,9 +192,11 @@ proxmox-helper-scripts/
 │   ├── media-server/          # Entertainment platform (coming soon)
 │   ├── web-server/            # Web hosting platform (coming soon)
 │   └── monitoring/            # Infrastructure monitoring (coming soon)
-├── templates/                  # Shared resources
-│   ├── common-functions.sh    # Shared utility functions
-│   ├── lxc-base.conf         # Base LXC configurations
+├── templates/                  # Shared resources and UI components
+│   ├── common-ui.sh          # Modern UI functions library
+│   ├── install-template.sh   # Standard installation script template
+│   ├── ui-demo.sh           # Interactive UI components demo
+│   ├── lxc-base.conf        # Base LXC configurations
 │   └── security-hardening.sh # Security configuration templates
 ├── tools/                     # Management utilities
 │   ├── backup-automation.sh  # Automated backup solutions
@@ -201,6 +204,7 @@ proxmox-helper-scripts/
 │   ├── health-monitoring.sh  # System health checks
 │   └── update-manager.sh     # Update management across containers
 ├── docs/                      # Documentation
+│   ├── ui-standards.md       # Modern UI design guidelines
 │   ├── installation-guide.md # General installation instructions
 │   ├── customization.md      # Modification and customization guide
 │   ├── troubleshooting.md    # Common issues and solutions
