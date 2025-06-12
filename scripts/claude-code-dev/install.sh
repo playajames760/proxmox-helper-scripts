@@ -1,539 +1,611 @@
 #!/usr/bin/env bash
 
 # Proxmox Helper Scripts - Claude Code Development Environment
-# Modern, intuitive installation experience for AI-powered development
+# Modern, reliable installation for AI-powered development
+# Based on community-scripts architecture with enhanced features
 # 
 # Usage: bash <(curl -fsSL https://raw.githubusercontent.com/playajames760/proxmox-helper-scripts/main/scripts/claude-code-dev/install.sh)
 
 set -euo pipefail
 
-# Load common UI functions
-source <(curl -fsSL https://raw.githubusercontent.com/playajames760/proxmox-helper-scripts/main/templates/common-ui.sh) || {
-    echo "Failed to load UI functions"
+# Configuration
+readonly SCRIPT_NAME="Claude Code Development Environment"
+readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_DESCRIPTION="Complete AI-powered development environment with Claude Code, VS Code Server, and modern dev tools"
+readonly GITHUB_REPO="playajames760/proxmox-helper-scripts"
+readonly GITHUB_BRANCH="main"
+readonly BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}"
+
+# Load build functions
+source <(curl -fsSL "${BASE_URL}/templates/build-functions.sh") || {
+    echo "❌ Failed to load build functions"
     exit 1
 }
 
-# Configuration
-readonly SCRIPT_NAME="Claude Code Development Environment"
-readonly SCRIPT_VERSION="1.0.0"
-readonly SCRIPT_DESCRIPTION="AI-powered development environment with VS Code Server, Node.js, and project templates"
-readonly GITHUB_REPO="playajames760/proxmox-helper-scripts"
-readonly GITHUB_BRANCH="main"
-readonly BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/scripts/claude-code-dev"
+# ===============================
+# Container Configuration
+# ===============================
 
 # Default container configuration
-declare -A CONFIG=(
-    ["Container ID"]=""
-    ["Container Name"]="claude-code-dev"
-    ["CPU Cores"]="4"
-    ["RAM (MB)"]="8192"
-    ["Disk Size (GB)"]="20"
-    ["Storage Pool"]="local-lvm"
-    ["Network Bridge"]="vmbr0"
-)
+CT_TYPE="1"          # 1=Unprivileged container, 0=Privileged
+CT_NAME="claude-code-dev"
+CT_ID=""
+CT_CORES="4"
+CT_RAM="8192"
+CT_STORAGE="20"
+CT_STORAGE_POOL=""
+CT_NET_BRIDGE=""
+CT_OS_TEMPLATE="ubuntu-22.04"
 
 # Feature flags
-declare -A FEATURES=(
-    ["VS Code Server"]="yes"
-    ["Project Templates"]="yes"
-    ["Development Volume"]="yes"
-    ["Auto Updates"]="yes"
-)
-
-# Additional configuration
+INSTALL_VSCODE="1"
+INSTALL_DOCKER="1"
+INSTALL_NODE="1"
+INSTALL_TEMPLATES="1"
+AUTO_START="1"
 DEV_VOLUME_SIZE="50"
 
-# Installation state
+# Installation tracking
 INSTALLATION_STAGE=""
-CT_ID=""
+CLEANUP_ENABLED="1"
 
-# Application metadata
+# ===============================
+# Application Metadata
+# ===============================
+
 app="Claude Code Dev Environment"
-var_tags="development;ai;claude;nodejs;vscode"
+var_tags="development;ai;claude;nodejs;vscode;docker"
 var_cpu="4"
-var_ram="8192"
+var_ram="8192"  
 var_disk="20"
 var_os="ubuntu"
 var_version="22.04"
 var_unprivileged="1"
 
-# Validation functions
-check_requirements() {
-    INSTALLATION_STAGE="Checking Requirements"
-    
-    # Check root
-    if [[ $EUID -ne 0 ]]; then
-        msg_error "This script must be run as root"
-    fi
-    
-    # Check Proxmox
-    if ! command -v pveversion >/dev/null 2>&1; then
-        msg_error "This script must be run on a Proxmox VE host"
-    fi
-    
-    # Check version
-    local pve_version
-    pve_version=$(pveversion | grep "pve-manager" | cut -d'/' -f2 | cut -d'-' -f1)
-    local major_version
-    major_version=$(echo "$pve_version" | cut -d'.' -f1)
-    
-    if [[ $major_version -lt 8 ]]; then
-        msg_warn "Proxmox VE $pve_version detected. Version 8.0+ recommended"
-    else
-        msg_success "Proxmox VE $pve_version supported"
-    fi
-}
+# ===============================
+# Error Handling Setup
+# ===============================
 
-get_next_vmid() {
-    local next_id=200
-    while pct status "$next_id" &>/dev/null || qm status "$next_id" &>/dev/null; do
-        ((next_id++))
-    done
-    echo "$next_id"
-}
-
-get_storage_pools() {
-    pvesm status -content rootdir | awk 'NR>1 {print $1}' | grep -v '^local$' | head -1
-}
-
-get_network_bridges() {
-    ip -br link show | grep -E '^vmbr' | awk '{print $1}' | head -1
-}
-
-# Interactive configuration with modern UI
-configure_basic() {
-    section_header "Basic Configuration"
-    
-    # Container ID
-    local default_id
-    default_id=$(get_next_vmid)
-    while true; do
-        prompt_input "Container ID" "$default_id" "CT_ID"
-        
-        if [[ ! $CT_ID =~ ^[0-9]+$ ]]; then
-            msg_warn "Container ID must be a number"
-            continue
-        fi
-        
-        if pct status "$CT_ID" &>/dev/null || qm status "$CT_ID" &>/dev/null; then
-            msg_warn "ID $CT_ID is already in use"
-            continue
-        fi
-        
-        CONFIG["Container ID"]="$CT_ID"
-        break
-    done
-    
-    # Container name
-    prompt_input "Container name" "${CONFIG["Container Name"]}" "CONFIG[Container Name]"
-    
-    # Resources
-    prompt_input "CPU cores" "${CONFIG["CPU Cores"]}" "CONFIG[CPU Cores]"
-    prompt_input "RAM in MB" "${CONFIG["RAM (MB)"]}" "CONFIG[RAM (MB)]"
-    prompt_input "Disk size in GB" "${CONFIG["Disk Size (GB)"]}" "CONFIG[Disk Size (GB)]"
-    
-    # Storage pool
-    local available_storage
-    available_storage=$(get_storage_pools)
-    prompt_input "Storage pool" "${available_storage:-${CONFIG["Storage Pool"]}}" "CONFIG[Storage Pool]"
-    
-    # Network
-    local available_bridge
-    available_bridge=$(get_network_bridges)
-    prompt_input "Network bridge" "${available_bridge:-${CONFIG["Network Bridge"]}}" "CONFIG[Network Bridge]"
-}
-
-configure_features() {
-    section_header "Features & Options"
-    
-    for feature in "${!FEATURES[@]}"; do
-        if prompt_yes_no "Enable ${feature}?" "${FEATURES[$feature]}"; then
-            FEATURES["$feature"]="yes"
-        else
-            FEATURES["$feature"]="no"
-        fi
-    done
-    
-    # Development volume size if enabled
-    if [[ "${FEATURES["Development Volume"]}" == "yes" ]]; then
-        prompt_input "Development volume size (GB)" "$DEV_VOLUME_SIZE" "DEV_VOLUME_SIZE"
-    fi
-}
-
-# Show configuration summary
-show_configuration() {
-    display_config CONFIG
-    
-    if [[ ${#FEATURES[@]} -gt 0 ]]; then
-        section_header "Enabled Features"
-        for feature in "${!FEATURES[@]}"; do
-            if [[ "${FEATURES[$feature]}" == "yes" ]]; then
-                echo -e "  ${COLOR_SUCCESS}${SYMBOL_CHECK}${COLOR_RESET} ${feature}"
-            fi
-        done
-        
-        if [[ "${FEATURES["Development Volume"]}" == "yes" ]]; then
-            echo -e "  ${COLOR_MUTED}${SYMBOL_BULLET}${COLOR_RESET} Volume Size: ${DEV_VOLUME_SIZE}GB"
-        fi
-        echo ""
-    fi
-    
-    if ! prompt_yes_no "Proceed with installation?" "yes"; then
-        msg_warn "Installation cancelled"
-        exit 0
-    fi
-}
-
-# Container creation with progress
-create_container() {
-    INSTALLATION_STAGE="Creating Container"
-    section_header "Creating Container"
-    
-    # Get available templates first
-    status_indicator "running" "Checking available templates..."
-    local available_templates
-    available_templates=$(pveam available | grep ubuntu-22.04 | head -1 | awk '{print $2}')
-    
-    if [[ -z "$available_templates" ]]; then
-        msg_error "No Ubuntu 22.04 templates found. Please check your internet connection."
-    fi
-    
-    local template_name="$available_templates"
-    local template_path="/var/lib/vz/template/cache/$template_name"
-    
-    msg_info "Using template: $template_name"
-    
-    # Download template if needed
-    if [[ ! -f "$template_path" ]]; then
-        status_indicator "running" "Updating template list..."
-        
-        # Update template list with timeout and proper error handling
-        local update_output
-        update_output=$(timeout 60 pveam update 2>&1)
-        local update_result=$?
-        
-        if [[ $update_result -ne 0 ]]; then
-            msg_error "Failed to update template list: $update_output"
-        fi
-        
-        status_indicator "success" "Template list updated"
-        status_indicator "running" "Downloading Ubuntu 22.04 template (this may take a few minutes)..."
-        
-        # Download template with timeout and progress
-        local download_output
-        download_output=$(timeout 600 pveam download local "$template_name" 2>&1)
-        local download_result=$?
-        
-        if [[ $download_result -ne 0 ]]; then
-            msg_error "Failed to download template: $download_output"
-        fi
-        
-        # Verify template downloaded
-        if [[ ! -f "$template_path" ]]; then
-            msg_error "Template file not found after download: $template_path"
-        fi
-        
-        msg_success "Template downloaded successfully"
-    else
-        msg_success "Template already available"
-    fi
-    
-    # Create container with detailed progress
-    status_indicator "running" "Creating container ${CONFIG["Container ID"]} with ${CONFIG["CPU Cores"]} cores, ${CONFIG["RAM (MB)"]}MB RAM..."
-    
-    # Build command with proper error handling
-    local create_result
-    local create_output
-    
-    # Execute container creation with timeout
-    create_output=$(timeout 120 pct create "${CONFIG["Container ID"]}" "$template_path" \
-        --hostname "${CONFIG["Container Name"]}" \
-        --cores "${CONFIG["CPU Cores"]}" \
-        --memory "${CONFIG["RAM (MB)"]}" \
-        --rootfs "${CONFIG["Storage Pool"]}:${CONFIG["Disk Size (GB)"]}" \
-        --net0 "name=eth0,bridge=${CONFIG["Network Bridge"]},firewall=1,ip=dhcp,type=veth" \
-        --unprivileged 1 \
-        --features "keyctl=1,nesting=1,fuse=1" \
-        --ostype ubuntu \
-        --onboot 1 \
-        --start 0 2>&1)
-    create_result=$?
-    
-    if [[ $create_result -ne 0 ]]; then
-        msg_error "Failed to create container (exit code: $create_result). Error: $create_output"
-    fi
-    
-    status_indicator "success" "Container created successfully"
-    
-    # Start container separately with proper error handling
-    status_indicator "running" "Starting container..."
-    local start_output
-    start_output=$(timeout 60 pct start "${CONFIG["Container ID"]}" 2>&1)
-    local start_result=$?
-    
-    if [[ $start_result -ne 0 ]]; then
-        msg_error "Failed to start container: $start_output"
-    fi
-    
-    status_indicator "success" "Container started successfully"
-    
-    # Create development volume
-    if [[ "${FEATURES["Development Volume"]}" == "yes" ]]; then
-        status_indicator "running" "Creating development volume (${DEV_VOLUME_SIZE}GB)..."
-        
-        local volume_result
-        local volume_output
-        volume_output=$(pct set "${CONFIG["Container ID"]}" -mp0 "${CONFIG["Storage Pool"]}:${DEV_VOLUME_SIZE},mp=/opt/development" 2>&1)
-        volume_result=$?
-        
-        if [[ $volume_result -ne 0 ]]; then
-            msg_warn "Failed to create development volume: $volume_output"
-        else
-            status_indicator "success" "Development volume created"
-        fi
-    fi
-}
-
-# Wait for container to be ready
-wait_for_container() {
-    status_indicator "running" "Waiting for container to be ready..."
-    
-    local timeout=60
-    local count=0
-    
-    while ! pct exec "${CONFIG["Container ID"]}" -- test -f /bin/bash 2>/dev/null; do
-        if [[ $count -ge $timeout ]]; then
-            msg_error "Container failed to become ready within $timeout seconds"
-        fi
-        sleep 1
-        ((count++))
-    done
-    
-    status_indicator "success" "Container is ready"
-}
-
-# Setup container with visual feedback
-setup_container() {
-    INSTALLATION_STAGE="Configuring Container"
-    section_header "Container Setup"
-    
-    # Wait for network
-    status_indicator "running" "Waiting for network connectivity..."
-    local count=0
-    while ! pct exec "${CONFIG["Container ID"]}" -- ping -c1 8.8.8.8 &>/dev/null; do
-        sleep 2
-        ((count++))
-        if [[ $count -gt 30 ]]; then
-            msg_error "Network timeout (60 seconds). Check network configuration."
-        fi
-    done
-    status_indicator "success" "Network ready"
-    
-    # Run setup script with progress
-    echo ""
-    echo -e "  ${COLOR_PRIMARY}${BOLD}Installing ${SCRIPT_NAME}...${COLOR_RESET}"
-    echo ""
-    
-    # Visual progress for main installation steps
-    local steps=("System Update" "Package Installation" "Development Tools" "VS Code Server" "Project Templates" "Security Setup" "Final Configuration")
-    local total_steps=${#steps[@]}
-    
-    # Download and execute setup script with environment variables
-    local setup_url="${BASE_URL}/setup.sh"
-    local env_vars="
-        export INSTALL_VSCODE='${FEATURES["VS Code Server"]}'
-        export INSTALL_TEMPLATES='${FEATURES["Project Templates"]}'
-        export AUTO_UPDATES='${FEATURES["Auto Updates"]}'
-        export GITHUB_REPO='$GITHUB_REPO'
-        export GITHUB_BRANCH='$GITHUB_BRANCH'
-        export DEV_VOLUME_SIZE='$DEV_VOLUME_SIZE'
-    "
-    
-    for i in "${!steps[@]}"; do
-        progress_bar $i $total_steps
-        status_indicator "running" "${steps[$i]}"
-        
-        # Execute setup script with proper error handling
-        if [[ $i -eq 0 ]]; then
-            # First step - run the actual setup script
-            local setup_output
-            setup_output=$(pct exec "${CONFIG["Container ID"]}" -- bash -c "$env_vars curl -fsSL '$setup_url' | bash" 2>&1)
-            local setup_result=$?
-            
-            if [[ $setup_result -ne 0 ]]; then
-                echo ""
-                msg_error "Setup script failed: $setup_output"
-            fi
-        else
-            # Simulate other steps for visual feedback
-            sleep 2
-        fi
-        
-        status_indicator "success" "${steps[$i]} completed"
-        progress_bar $((i + 1)) $total_steps
-        
-        if [[ $i -lt $((total_steps - 1)) ]]; then
-            echo ""
-        fi
-    done
-    
-    echo ""
-    msg_success "Development environment setup completed"
-}
-
-# Get container IP
-get_container_ip() {
-    local ip
-    local timeout=30
-    local count=0
-    
-    while true; do
-        ip=$(pct exec "${CONFIG["Container ID"]}" -- hostname -I 2>/dev/null | awk '{print $1}' | tr -d ' \n')
-        
-        if [[ -n "$ip" && "$ip" != "127.0.0.1" ]]; then
-            echo "$ip"
-            return 0
-        fi
-        
-        if [[ $count -ge $timeout ]]; then
-            echo "Pending..."
-            return 1
-        fi
-        
-        sleep 1
-        ((count++))
-    done
-}
-
-# Display completion information
-show_completion() {
-    local ip
-    ip=$(get_container_ip)
-    
-    declare -A completion_info=(
-        ["Container Information"]="ID: ${CONFIG["Container ID"]}
-Name: ${CONFIG["Container Name"]}
-IP Address: ${ip}
-Resources: ${CONFIG["CPU Cores"]} vCPU, ${CONFIG["RAM (MB)"]}MB RAM, ${CONFIG["Disk Size (GB)"]}GB Disk"
-        
-        ["Access Details"]="Container Access: pct enter ${CONFIG["Container ID"]} && su - developer
-Direct SSH: ssh developer@${ip} (use generated SSH key)$(if [[ "${FEATURES["VS Code Server"]}" == "yes" ]]; then echo "
-VS Code Server: http://${ip}:8080
-VS Code Password: claude-code-dev-2025"; fi)"
-        
-        ["Quick Start"]="1. Enter container: pct enter ${CONFIG["Container ID"]} && su - developer
-2. Authenticate Claude Code: claude
-3. Start new project: claude-init my-project
-4. Check system health: health-check"
-        
-        ["SSH Key Setup"]="To use SSH key authentication:
-1. Get public key: pct exec ${CONFIG["Container ID"]} -- cat /home/developer/.ssh/id_ed25519.pub
-2. Add to ~/.ssh/authorized_keys on your machine
-3. SSH with: ssh -i <path-to-private-key> developer@${ip}"
-        
-        ["Useful Commands"]="• claude-init <project> - Initialize new project
-• dev [project] - Navigate to development directory
-• new-project <type> <name> - Create templated project
-• claude --continue - Continue previous session
-• health-check - System diagnostics"
-        
-        ["Container Management"]="Enter container: pct enter ${CONFIG["Container ID"]}
-View logs: pct exec ${CONFIG["Container ID"]} -- journalctl -f
-Stop container: pct stop ${CONFIG["Container ID"]}
-Start container: pct start ${CONFIG["Container ID"]}"
-    )
-    
-    display_completion "$SCRIPT_NAME" completion_info
-}
-
-# Error handling with cleanup
 cleanup_on_error() {
     local exit_code=$?
     
-    # Stop any running spinners
-    stop_spinner 2>/dev/null || true
-    
-    echo ""
-    msg_error "Installation failed at stage: ${INSTALLATION_STAGE} (exit code: $exit_code)"
-    
-    if [[ -n "${CONFIG["Container ID"]}" ]] && pct status "${CONFIG["Container ID"]}" &>/dev/null; then
-        if prompt_yes_no "Remove failed container ${CONFIG["Container ID"]}?" "yes"; then
-            status_indicator "running" "Cleaning up failed container..."
-            pct stop "${CONFIG["Container ID"]}" 2>/dev/null || true
-            sleep 2
-            pct destroy "${CONFIG["Container ID"]}" 2>/dev/null || true
-            status_indicator "success" "Container removed"
+    if [[ "$CLEANUP_ENABLED" == "1" && -n "${CT_ID:-}" ]]; then
+        echo ""
+        msg_error "Installation failed at stage: ${INSTALLATION_STAGE:-Unknown} (exit code: $exit_code)"
+        
+        # Provide stage-specific troubleshooting
+        case "${INSTALLATION_STAGE:-}" in
+            "Validation")
+                echo -e "\n${YELLOW}Troubleshooting steps:${NC}"
+                echo -e "  1. Check Proxmox version: pveversion"
+                echo -e "  2. Verify storage pools: pvesm status"
+                echo -e "  3. Check network bridges: ip link show"
+                ;;
+            "Template Download")
+                echo -e "\n${YELLOW}Troubleshooting steps:${NC}"
+                echo -e "  1. Check internet connectivity: ping 8.8.8.8"
+                echo -e "  2. Verify storage access: pvesm status ${CT_STORAGE_POOL:-local}"
+                echo -e "  3. Try manual download: pveam download ${CT_STORAGE_POOL:-local} <template>"
+                ;;
+            "Container Creation")
+                echo -e "\n${YELLOW}Troubleshooting steps:${NC}"
+                echo -e "  1. Check container status: pct status ${CT_ID}"
+                echo -e "  2. Review Proxmox logs: journalctl -u pvedaemon"
+                echo -e "  3. Verify template: ls -la /var/lib/vz/template/cache/"
+                ;;
+            "Container Setup")
+                echo -e "\n${YELLOW}Troubleshooting steps:${NC}"
+                echo -e "  1. Check container logs: pct exec ${CT_ID} -- journalctl -n 50"
+                echo -e "  2. Test network: pct exec ${CT_ID} -- ping google.com"
+                echo -e "  3. Manual setup: pct enter ${CT_ID}"
+                ;;
+        esac
+        
+        echo ""
+        if [[ -t 0 ]]; then  # Check if running interactively
+            read -p "Remove failed container ${CT_ID}? [y/N]: " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                cleanup_failed_container "$CT_ID"
+            fi
+        else
+            msg_warn "Run 'pct destroy ${CT_ID}' to remove failed container"
         fi
     fi
+    
     exit $exit_code
 }
 
-# Cleanup on script termination
 cleanup_on_exit() {
-    stop_spinner 2>/dev/null || true
+    # Clean exit handler
+    :
 }
 
 trap cleanup_on_error ERR
 trap cleanup_on_exit EXIT INT TERM
 
-# Main installation flow
-main() {
-    # Display header
-    display_header "$SCRIPT_NAME" "$SCRIPT_VERSION" "$SCRIPT_DESCRIPTION"
+# ===============================
+# Variable Configuration
+# ===============================
+
+variables() {
+    # Set CT_ID if not provided
+    if [[ -z "${CT_ID}" ]]; then
+        CT_ID=$(get_next_vmid 200)
+    fi
     
-    # Check requirements
-    check_requirements
+    # Set storage pool if not provided
+    if [[ -z "${CT_STORAGE_POOL}" ]]; then
+        local available_pools
+        available_pools=($(get_storage_pools))
+        CT_STORAGE_POOL="${available_pools[0]:-local-lvm}"
+    fi
     
-    # Configuration mode
-    if [[ "${1:-}" == "--auto" ]]; then
-        # Auto mode - use all defaults
-        CONFIG["Container ID"]=$(get_next_vmid)
-        CONFIG["Storage Pool"]=$(get_storage_pools)
-        CONFIG["Network Bridge"]=$(get_network_bridges)
-        msg_info "Using automatic configuration"
-    else
-        # Interactive mode
-        configure_basic
+    # Set network bridge if not provided
+    if [[ -z "${CT_NET_BRIDGE}" ]]; then
+        local available_bridges
+        available_bridges=($(get_network_bridges))
+        CT_NET_BRIDGE="${available_bridges[0]:-vmbr0}"
+    fi
+    
+    # Override with environment variables if set
+    CT_TYPE="${CT_TYPE:-$var_unprivileged}"
+    CT_CORES="${CORES:-$CT_CORES}"
+    CT_RAM="${RAM:-$CT_RAM}"
+    CT_STORAGE="${STORAGE:-$CT_STORAGE}"
+}
+
+# ===============================
+# Interactive Configuration
+# ===============================
+
+interactive_config() {
+    echo ""
+    msg_info "=== Interactive Configuration ==="
+    echo ""
+    
+    # Container ID
+    while true; do
+        read -p "Container ID [$CT_ID]: " input_id
+        input_id="${input_id:-$CT_ID}"
         
-        if prompt_yes_no "Configure additional features?" "yes"; then
-            configure_features
+        if validate_container_id "$input_id" 2>/dev/null; then
+            CT_ID="$input_id"
+            break
+        else
+            msg_warn "Invalid or already used ID: $input_id"
+        fi
+    done
+    
+    # Container name
+    read -p "Container name [$CT_NAME]: " input_name
+    CT_NAME="${input_name:-$CT_NAME}"
+    
+    # Resources
+    read -p "CPU cores [$CT_CORES]: " input_cores
+    CT_CORES="${input_cores:-$CT_CORES}"
+    
+    read -p "RAM in MB [$CT_RAM]: " input_ram
+    CT_RAM="${input_ram:-$CT_RAM}"
+    
+    read -p "Disk size in GB [$CT_STORAGE]: " input_storage
+    CT_STORAGE="${input_storage:-$CT_STORAGE}"
+    
+    # Storage pool selection
+    echo ""
+    msg_info "Available storage pools:"
+    local pools
+    pools=($(get_storage_pools))
+    for i in "${!pools[@]}"; do
+        echo "  $((i+1)). ${pools[i]}"
+    done
+    read -p "Select storage pool [1]: " pool_choice
+    pool_choice="${pool_choice:-1}"
+    CT_STORAGE_POOL="${pools[$((pool_choice-1))]:-${pools[0]}}"
+    
+    # Network bridge selection
+    echo ""
+    msg_info "Available network bridges:"
+    local bridges
+    bridges=($(get_network_bridges))
+    for i in "${!bridges[@]}"; do
+        echo "  $((i+1)). ${bridges[i]}"
+    done
+    read -p "Select network bridge [1]: " bridge_choice
+    bridge_choice="${bridge_choice:-1}"
+    CT_NET_BRIDGE="${bridges[$((bridge_choice-1))]:-${bridges[0]}}"
+    
+    # Features
+    echo ""
+    msg_info "Optional features:"
+    
+    read -p "Install VS Code Server? [Y/n]: " vscode_choice
+    INSTALL_VSCODE=$([[ "${vscode_choice,,}" =~ ^n ]] && echo "0" || echo "1")
+    
+    read -p "Install Docker? [Y/n]: " docker_choice
+    INSTALL_DOCKER=$([[ "${docker_choice,,}" =~ ^n ]] && echo "0" || echo "1")
+    
+    read -p "Install project templates? [Y/n]: " templates_choice
+    INSTALL_TEMPLATES=$([[ "${templates_choice,,}" =~ ^n ]] && echo "0" || echo "1")
+    
+    if [[ "$INSTALL_TEMPLATES" == "1" ]]; then
+        read -p "Development volume size in GB [$DEV_VOLUME_SIZE]: " vol_size
+        DEV_VOLUME_SIZE="${vol_size:-$DEV_VOLUME_SIZE}"
+    fi
+}
+
+# ===============================
+# Validation and Preparation
+# ===============================
+
+validate_environment() {
+    INSTALLATION_STAGE="Validation"
+    
+    msg_step "Validating environment"
+    
+    # Basic checks
+    check_root
+    check_proxmox
+    
+    # Resource validation
+    validate_container_id "$CT_ID"
+    check_storage_space "$CT_STORAGE_POOL" "$((CT_STORAGE + DEV_VOLUME_SIZE))"
+    check_memory_available "$CT_RAM"
+    validate_network_bridge "$CT_NET_BRIDGE"
+    
+    msg_ok "Environment validation passed"
+}
+
+# ===============================
+# Container Creation
+# ===============================
+
+create_claude_container() {
+    INSTALLATION_STAGE="Template Download"
+    
+    # Get and download template
+    local template_name
+    template_name=$(get_latest_template "$CT_OS_TEMPLATE" "$CT_STORAGE_POOL")
+    
+    local template_path
+    template_path=$(download_template "$CT_STORAGE_POOL" "$template_name")
+    
+    INSTALLATION_STAGE="Container Creation"
+    
+    # Build container configuration
+    local storage_config="${CT_STORAGE_POOL}:${CT_STORAGE}"
+    local network_config="name=eth0,bridge=${CT_NET_BRIDGE},firewall=1,ip=dhcp,type=veth"
+    local features="keyctl=1,nesting=1,fuse=1"
+    
+    # Create container
+    create_container \
+        "$CT_ID" \
+        "$CT_NAME" \
+        "$template_path" \
+        "$CT_CORES" \
+        "$CT_RAM" \
+        "$storage_config" \
+        "$network_config" \
+        "$features"
+    
+    # Start and prepare container
+    start_container "$CT_ID"
+    wait_for_container_boot "$CT_ID"
+    wait_for_network "$CT_ID"
+    
+    # Add development volume if requested
+    if [[ "$INSTALL_TEMPLATES" == "1" && "$DEV_VOLUME_SIZE" -gt 0 ]]; then
+        msg_step "Adding development volume (${DEV_VOLUME_SIZE}GB)"
+        if pct set "$CT_ID" -mp0 "${CT_STORAGE_POOL}:${DEV_VOLUME_SIZE},mp=/opt/development" 2>/dev/null; then
+            msg_ok "Development volume added"
+        else
+            msg_warn "Failed to add development volume"
+        fi
+    fi
+}
+
+# ===============================
+# Container Setup
+# ===============================
+
+setup_claude_environment() {
+    INSTALLATION_STAGE="Container Setup"
+    
+    msg_step "Setting up Claude Code development environment"
+    
+    # Update system
+    run_in_container "$CT_ID" "
+        apt-get update && 
+        DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+    " "Updating system packages"
+    
+    # Install essential packages
+    local essential_packages=(
+        "curl" "wget" "git" "build-essential" "software-properties-common"
+        "apt-transport-https" "ca-certificates" "gnupg" "lsb-release"
+        "unzip" "zip" "jq" "tree" "htop" "nano" "vim" "tmux" "sudo"
+        "openssh-server" "python3" "python3-pip" "zsh" "fail2ban" "ufw"
+    )
+    
+    install_packages "$CT_ID" "${essential_packages[@]}"
+    
+    # Install Node.js 20 LTS
+    if [[ "$INSTALL_NODE" == "1" ]]; then
+        run_in_container "$CT_ID" "
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
+            apt-get install -y nodejs
+        " "Installing Node.js 20 LTS"
+    fi
+    
+    # Install Docker
+    if [[ "$INSTALL_DOCKER" == "1" ]]; then
+        run_in_container "$CT_ID" "
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg &&
+            echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" | tee /etc/apt/sources.list.d/docker.list > /dev/null &&
+            apt-get update &&
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin &&
+            systemctl enable docker &&
+            systemctl start docker
+        " "Installing Docker"
+    fi
+    
+    # Install GitHub CLI
+    run_in_container "$CT_ID" "
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg &&
+        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg &&
+        echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null &&
+        apt-get update &&
+        apt-get install -y gh
+    " "Installing GitHub CLI"
+    
+    # Install Claude Code
+    run_in_container "$CT_ID" "
+        npm install -g @anthropic-ai/claude-code@latest
+    " "Installing Claude Code"
+    
+    # Install additional npm packages
+    if [[ "$INSTALL_NODE" == "1" ]]; then
+        run_in_container "$CT_ID" "
+            npm install -g yarn pnpm typescript eslint prettier nodemon pm2 http-server
+        " "Installing development npm packages"
+    fi
+    
+    # Download and execute setup script
+    msg_step "Configuring development environment"
+    
+    local setup_env="
+        export INSTALL_VSCODE='$INSTALL_VSCODE'
+        export INSTALL_DOCKER='$INSTALL_DOCKER'
+        export INSTALL_TEMPLATES='$INSTALL_TEMPLATES'
+        export GITHUB_REPO='$GITHUB_REPO'
+        export GITHUB_BRANCH='$GITHUB_BRANCH'
+        export DEV_VOLUME_SIZE='$DEV_VOLUME_SIZE'
+        export AUTO_START='$AUTO_START'
+    "
+    
+    run_in_container "$CT_ID" "
+        $setup_env
+        curl -fsSL '${BASE_URL}/scripts/claude-code-dev/setup.sh' | bash
+    " "Executing setup script"
+    
+    msg_ok "Claude Code environment setup completed"
+}
+
+# ===============================
+# Post-Installation Validation
+# ===============================
+
+validate_installation() {
+    msg_step "Validating installation"
+    
+    local validation_failed=false
+    
+    # Check services
+    local required_services=("ssh")
+    [[ "$INSTALL_DOCKER" == "1" ]] && required_services+=("docker")
+    [[ "$INSTALL_VSCODE" == "1" ]] && required_services+=("code-server")
+    
+    for service in "${required_services[@]}"; do
+        if ! pct exec "$CT_ID" -- systemctl is-active --quiet "$service" 2>/dev/null; then
+            msg_warn "Service $service is not running"
+            validation_failed=true
+        fi
+    done
+    
+    # Check tools
+    local required_tools=("git" "curl")
+    [[ "$INSTALL_NODE" == "1" ]] && required_tools+=("node" "npm")
+    [[ "$INSTALL_DOCKER" == "1" ]] && required_tools+=("docker")
+    
+    # Check Claude Code specifically
+    if pct exec "$CT_ID" -- command -v claude &>/dev/null; then
+        local claude_version
+        claude_version=$(pct exec "$CT_ID" -- claude --version 2>/dev/null || echo "unknown")
+        msg_ok "Claude Code installed: $claude_version"
+    else
+        msg_warn "Claude Code command not found"
+        validation_failed=true
+    fi
+    
+    for tool in "${required_tools[@]}"; do
+        if ! pct exec "$CT_ID" -- command -v "$tool" &>/dev/null; then
+            msg_warn "Tool $tool is not available"
+            validation_failed=true
+        fi
+    done
+    
+    # Check network connectivity to Claude API
+    if pct exec "$CT_ID" -- curl -s --connect-timeout 5 https://api.anthropic.com/v1/models &>/dev/null; then
+        msg_ok "Claude API connectivity verified"
+    else
+        msg_warn "Cannot reach Claude API (may affect authentication)"
+    fi
+    
+    if [[ "$validation_failed" == "true" ]]; then
+        msg_warn "Some components failed validation"
+        return 1
+    else
+        msg_ok "All components validated successfully"
+        return 0
+    fi
+}
+
+# ===============================
+# Completion Display
+# ===============================
+
+show_completion() {
+    local container_ip
+    container_ip=$(get_container_ip "$CT_ID")
+    
+    clear
+    echo ""
+    echo "🎉 Claude Code Development Environment Ready!"
+    echo "=========================================="
+    echo ""
+    echo "📋 Container Information:"
+    echo "   ID: $CT_ID"
+    echo "   Name: $CT_NAME"
+    echo "   IP Address: $container_ip"
+    echo "   Resources: $CT_CORES vCPU, ${CT_RAM}MB RAM, ${CT_STORAGE}GB Disk"
+    echo ""
+    echo "🚀 Access Methods:"
+    echo "   Container Access: pct enter $CT_ID && su - developer"
+    echo "   SSH Access: ssh developer@$container_ip"
+    
+    if [[ "$INSTALL_VSCODE" == "1" ]]; then
+        echo "   VS Code Server: http://$container_ip:8080"
+        local vscode_pass
+        if vscode_pass=$(pct exec "$CT_ID" -- cat /home/developer/.vscode-password 2>/dev/null); then
+            echo "   VS Code Password: $vscode_pass"
         fi
     fi
     
-    # Show summary and confirm
-    show_configuration
+    echo ""
+    echo "🔑 Authentication Setup:"
+    echo "   1. Enter container: pct enter $CT_ID && su - developer"
+    echo "   2. Run: claude"
+    echo "   3. Follow authentication prompts"
+    echo "   4. Choose 'Console' for headless or 'App' for browser auth"
+    echo ""
+    echo "⚡ Quick Start Commands:"
+    echo "   claude                    # Start Claude Code"
+    echo "   claude-init my-project    # Initialize new project"
+    echo "   dev [project-name]        # Navigate to project"
+    echo "   health-check              # System diagnostics"
+    echo ""
     
-    # Perform installation
-    create_container
-    wait_for_container
-    setup_container
+    if [[ "$INSTALL_TEMPLATES" == "1" ]]; then
+        echo "📁 Development Structure:"
+        echo "   /opt/development/projects/  # Your projects"
+        echo "   /opt/development/templates/ # Project templates"
+        echo "   /opt/development/bin/       # Custom scripts"
+        echo ""
+    fi
+    
+    echo "📚 Documentation:"
+    echo "   Authentication Guide: /home/developer/AUTHENTICATION.md"
+    echo "   Project Documentation: /home/developer/README.md"
+    echo ""
+    
+    if ! validate_installation &>/dev/null; then
+        echo "⚠️  Some components need attention. Run 'health-check' in the container for details."
+        echo ""
+    fi
+    
+    echo "✅ Installation completed successfully!"
+    echo ""
+}
+
+# ===============================
+# Main Execution Flow
+# ===============================
+
+main() {
+    # Disable cleanup during normal header display
+    CLEANUP_ENABLED="0"
+    
+    # Display header
+    header_info
+    
+    echo ""
+    echo -e "${BOLD}${CYAN}$SCRIPT_NAME${NC}"
+    echo -e "${BLUE}Version: $SCRIPT_VERSION${NC}"
+    echo -e "${GREEN}$SCRIPT_DESCRIPTION${NC}"
+    echo ""
+    
+    # Re-enable cleanup after header
+    CLEANUP_ENABLED="1"
+    
+    # Process command line arguments
+    case "${1:-}" in
+        "--auto")
+            msg_info "Using automatic configuration with defaults"
+            ;;
+        "--help"|"-h")
+            echo "Usage: $0 [--auto|--help]"
+            echo ""
+            echo "Options:"
+            echo "  --auto    Use automatic configuration with defaults"
+            echo "  --help    Show this help message"
+            echo ""
+            echo "Environment Variables:"
+            echo "  CORES=4           Number of CPU cores"
+            echo "  RAM=8192          RAM in MB"
+            echo "  STORAGE=20        Disk size in GB"
+            echo "  CT_ID=200         Container ID"
+            echo "  CT_NAME=name      Container name"
+            echo ""
+            exit 0
+            ;;
+        "")
+            # Interactive mode
+            interactive_config
+            ;;
+        *)
+            msg_error "Unknown option: $1. Use --help for usage information."
+            ;;
+    esac
+    
+    # Set variables
+    variables
+    
+    # Show configuration summary
+    echo ""
+    msg_info "=== Configuration Summary ==="
+    echo "  Container ID: $CT_ID"
+    echo "  Container Name: $CT_NAME"
+    echo "  CPU Cores: $CT_CORES"
+    echo "  RAM: ${CT_RAM}MB"
+    echo "  Storage: ${CT_STORAGE}GB"
+    echo "  Storage Pool: $CT_STORAGE_POOL"
+    echo "  Network Bridge: $CT_NET_BRIDGE"
+    echo "  VS Code Server: $([[ $INSTALL_VSCODE == "1" ]] && echo "Yes" || echo "No")"
+    echo "  Docker: $([[ $INSTALL_DOCKER == "1" ]] && echo "Yes" || echo "No")"
+    echo "  Project Templates: $([[ $INSTALL_TEMPLATES == "1" ]] && echo "Yes" || echo "No")"
+    echo ""
+    
+    if [[ -t 0 && "${1:-}" != "--auto" ]]; then
+        read -p "Proceed with installation? [Y/n]: " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            msg_info "Installation cancelled"
+            exit 0
+        fi
+    fi
+    
+    # Execute installation
+    validate_environment
+    create_claude_container
+    setup_claude_environment
     
     # Show completion
     show_completion
 }
 
-# Help message (before UI functions are loaded)
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo ""
-    echo "  Claude Code Development Environment Installer"
-    echo ""
-    echo "  Modern AI-powered development environment with VS Code Server,"
-    echo "  Node.js, project templates, and Claude integration."
-    echo ""
-    echo "  Usage:"
-    echo "    $0              # Interactive installation"
-    echo "    $0 --auto       # Automatic installation with defaults"
-    echo "    $0 --help       # Show this help"
-    echo ""
-    echo "  Requirements:"
-    echo "    ✓ Proxmox VE 8.0+"
-    echo "    ✓ Run as root on Proxmox host"
-    echo "    ✓ Internet connection"
-    echo ""
-    echo "  Part of Proxmox Helper Scripts Collection"
-    echo ""
-    exit 0
-fi
+# ===============================
+# Script Execution
+# ===============================
 
-# Run main function
+# Run main function with all arguments
 main "$@"
