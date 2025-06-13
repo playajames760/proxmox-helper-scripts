@@ -148,8 +148,9 @@ check_storage_space() {
         used_bytes=$(echo "$storage_info" | awk '{print $2}')
         
         if [[ -n "$total_bytes" && -n "$used_bytes" ]]; then
-            total_gb=$((total_bytes / 1024 / 1024 / 1024))
-            available_gb=$(((total_bytes - used_bytes) / 1024 / 1024 / 1024))
+            # pvesm status values are in KB, convert to GB
+            total_gb=$((total_bytes / 1024 / 1024))
+            available_gb=$(((total_bytes - used_bytes) / 1024 / 1024))
         else
             msg_warn "Could not parse storage space for '$storage_pool', assuming sufficient space"
             return 0
