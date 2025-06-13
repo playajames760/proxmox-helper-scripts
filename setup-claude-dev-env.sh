@@ -801,12 +801,14 @@ create_proxmox_container() {
     
     # Create container
     msg_info "Creating container ${vmid} with hostname ${hostname}..."
+    msg_info "Network config: name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG}"
+    
     pct create "$vmid" "$template" \
         --cores 2 \
         --hostname "$hostname" \
         --memory 2048 \
         --swap 1024 \
-        --net0 name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG} \
+        --net0 "name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG}" \
         --storage local-lvm \
         --rootfs local-lvm:8 \
         --unprivileged 1 \
