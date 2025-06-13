@@ -666,14 +666,14 @@ gather_ssh_config() {
             
             case $key_choice in
                 1)
-                    if [[ -f ~/.ssh/id_rsa.pub ]]; then
-                        SSH_PUBLIC_KEY=$(cat ~/.ssh/id_rsa.pub)
-                        msg_success "Using SSH key from ~/.ssh/id_rsa.pub"
-                    elif [[ -f ~/.ssh/id_ed25519.pub ]]; then
-                        SSH_PUBLIC_KEY=$(cat ~/.ssh/id_ed25519.pub)
-                        msg_success "Using SSH key from ~/.ssh/id_ed25519.pub"
+                    if [[ -f /root/.ssh/id_rsa.pub ]]; then
+                        SSH_PUBLIC_KEY=$(cat /root/.ssh/id_rsa.pub)
+                        msg_success "Using SSH key from /root/.ssh/id_rsa.pub"
+                    elif [[ -f /root/.ssh/id_ed25519.pub ]]; then
+                        SSH_PUBLIC_KEY=$(cat /root/.ssh/id_ed25519.pub)
+                        msg_success "Using SSH key from /root/.ssh/id_ed25519.pub"
                     else
-                        msg_warning "No SSH key found in ~/.ssh/"
+                        msg_warning "No SSH key found in /root/.ssh/"
                         echo "Please paste your SSH public key:"
                         read -r SSH_PUBLIC_KEY
                     fi
@@ -725,6 +725,10 @@ gather_ssh_config() {
             msg_info "Container will use static IP: $static_ip"
             ;;
     esac
+    
+    msg_info "DEBUG: SSH_AUTH_METHOD='${SSH_AUTH_METHOD}'"
+    msg_info "DEBUG: SSH_PUBLIC_KEY length: ${#SSH_PUBLIC_KEY}"
+    msg_info "DEBUG: CONTAINER_IP_CONFIG='${CONTAINER_IP_CONFIG}'"
 }
 
 # Function to create Proxmox LXC container
@@ -803,7 +807,8 @@ create_proxmox_container() {
     msg_info "Creating container ${vmid} with hostname ${hostname}..."
     msg_info "Network config: name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG}"
     
-    pct create "$vmid" "$template" \
+    # Try container creation with proper error handling
+    if ! pct create "$vmid" "$template" \
         --cores 2 \
         --hostname "$hostname" \
         --memory 2048 \
@@ -815,7 +820,28 @@ create_proxmox_container() {
         --features keyctl=1,nesting=1,fuse=1 \
         --ostype ubuntu \
         --start 1 \
-        --onboot 0
+        --onboot 0; then
+        msg_error "Failed to create container"
+        msg_info "Trying with simpler network configuration..."
+        
+        # Fallback: try with basic DHCP config
+        if ! pct create "$vmid" "$template" \
+            --cores 2 \
+            --hostname "$hostname" \
+            --memory 2048 \
+            --swap 1024 \
+            --net0 "name=eth0,bridge=vmbr0,ip=dhcp" \
+            --storage local-lvm \
+            --rootfs local-lvm:8 \
+            --unprivileged 1 \
+            --features keyctl=1,nesting=1,fuse=1 \
+            --ostype ubuntu \
+            --start 1 \
+            --onboot 0; then
+            msg_error "Container creation failed completely"
+            exit 1
+        fi
+    fi
     
     # Wait for container to start
     msg_info "Waiting for container to start..."
