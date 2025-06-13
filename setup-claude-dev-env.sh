@@ -144,6 +144,9 @@ detect_environments() {
     
     local detected=()
     
+    # Always available
+    detected+=("💻 Local system")
+    
     # Check for Proxmox VE
     if [[ -f /etc/pve/version ]] || [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]] || \
        [[ -d /etc/pve ]] || (systemctl is-active --quiet pve-cluster 2>/dev/null || true) || \
@@ -164,17 +167,10 @@ detect_environments() {
         detected+=("🐳 Docker $DOCKER_VERSION")
     fi
     
-    # Always available
-    detected+=("💻 Local system")
-    
-    if [[ ${#detected[@]} -eq 1 ]]; then
-        msg_success "Available: ${detected[0]}"
-    else
-        echo -e "${GREEN}✅ Detected environments:${NC}"
-        for env in "${detected[@]}"; do
-            echo -e "  $env"
-        done
-    fi
+    echo -e "${GREEN}✅ Detected environments:${NC}"
+    for env in "${detected[@]}"; do
+        echo -e "  $env"
+    done
 }
 
 # Function to display modern interactive menu
