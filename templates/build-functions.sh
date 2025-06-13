@@ -291,11 +291,28 @@ download_template() {
     msg_info "Template details: storage='$storage', template='$template'"
     msg_info "Local path will be: $local_path"
     
-    # Check if template already exists
+    # Check if template exists in the specified storage first
+    if pveam list "$storage" 2>/dev/null | grep -q "$template"; then
+        msg_ok "Template available in storage $storage: $template"
+        echo "${storage}:vztmpl/${template}"
+        return 0
+    fi
+    
+    # Check if template already exists locally and copy to target storage if needed
     if [[ -f "$local_path" ]]; then
-        msg_ok "Template already available: $template"
-        # Return local path for existing templates
-        echo "local:vztmpl/$template"
+        msg_ok "Template available locally: $template"
+        
+        # If template exists locally but not in target storage, copy it
+        if [[ "$storage" != "local" ]]; then
+            msg_info "Copying template to storage $storage"
+            if ! pveam download "$storage" "$template" 2>/dev/null; then
+                msg_warn "Failed to copy template to $storage, using local copy"
+                echo "local:vztmpl/${template}"
+                return 0
+            fi
+        fi
+        
+        echo "${storage}:vztmpl/${template}"
         return 0
     fi
     
@@ -322,8 +339,8 @@ download_template() {
     fi
     
     msg_ok "Template downloaded: $template"
-    # Return local path format for newly downloaded templates
-    echo "local:vztmpl/$template"
+    # Return the full template path
+    echo "${storage}:vztmpl/${template}"
 }
 
 # ===============================
