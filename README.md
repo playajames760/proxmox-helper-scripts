@@ -1,43 +1,66 @@
-# Universal Claude Code Development Environment Setup
+# Proxmox Helper Scripts
 
-A flexible one-command installer script that creates isolated Claude Code development environments with support for local installation, Proxmox LXC containers, or Docker containers.
+A collection of installer scripts for various applications and development environments, with support for local installation, Proxmox LXC containers, and Docker containers.
 
 ## Features
 
 - 🚀 **Universal deployment** - Works locally, in Proxmox LXC containers, or Docker
 - 🎨 **Fancy terminal UI** with colors, progress bars, and ASCII art  
-- 📂 **Multiple project modes** - New projects, clone existing repos, or setup current directory
 - 🔍 **Environment detection** - Automatically detects Proxmox VE and Docker availability
-- 📦 **Automatic dependency installation** (Node.js, npm)
-- 🤖 **Claude Code setup** for Max subscription users
-- 🔌 **Essential MCP servers** pre-configured for development
-- ⚡ **Interactive server selection** with descriptions
-- 🐳 **Container isolation** - Clean, reproducible development environments
+- 📦 **Automated installations** for various applications and services
+- 🔧 **Shared utilities** - Common functions across all installers
+- ⚡ **Interactive setup** with guided configuration
+- 🐳 **Container isolation** - Clean, reproducible environments
+- 📁 **Modular design** - Easy to add new installer scripts
 
-## Quick Install
+## Quick Start
 
-### One-line Installation
+### Interactive Installer (Recommended)
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/[your-username]/proxmox-helper-scripts/main/setup-claude-dev-env.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/[your-username]/proxmox-helper-scripts/main/install.sh)"
 ```
 
-### Environment Options
+## Available Installers
 
-The script will automatically detect and offer available environments:
+### Claude Code Development Environment
+Complete development environment with Claude Code, Node.js, and essential MCP servers.
+
+**Direct Installation:**
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/[your-username]/proxmox-helper-scripts/main/installers/claude-code/install.sh)"
+```
+
+### Coming Soon
+- Docker development environments
+- Database servers (PostgreSQL, MySQL, MongoDB)
+- Web servers (Nginx, Apache)
+- Monitoring stacks (Prometheus, Grafana)
+- And more...
+
+## Installation Options
+
+All installers automatically detect and offer available environments:
 
 1. **Local Installation** - Install directly on current system
 2. **Proxmox LXC Container** - Create isolated container (when on Proxmox)
 3. **Docker Container** - Portable containerized environment (when Docker available)
 
-### Project Setup Modes
+## Directory Structure
 
-Choose how to set up your development project:
+```
+proxmox-helper-scripts/
+├── README.md                    # This file
+├── installers/
+│   ├── shared/
+│   │   └── common.sh           # Shared utilities and functions
+│   └── claude-code/
+│       └── install.sh          # Claude Code development environment
+└── docs/                       # Additional documentation
+```
 
-1. **New Project** - Start fresh with a new project directory
-2. **Clone Existing Repository** - Git clone an existing repo into the environment
-3. **Setup Current Directory** - Use the current directory as your project base
+## Claude Code Installer Features
 
-## Available MCP Servers
+The Claude Code installer includes:
 
 ### Core Development
 - **GitHub MCP Server** - Repository management, issues, PRs
@@ -60,13 +83,18 @@ Choose how to set up your development project:
 - **Mentor MCP Server** - AI-powered code review
 - **Perplexity MCP Server** - Enhanced search capabilities
 
+### Project Setup Modes
+- **New Project** - Start fresh with a new project directory
+- **Clone Existing Repository** - Git clone an existing repo into the environment
+- **Setup Current Directory** - Use the current directory as your project base
+
 ## Requirements
 
 - Internet connectivity
 - One of: Local system, Proxmox VE host, or Docker installation
 - Root or sudo access (for container creation)
 - At least 2GB free disk space
-- Claude Max subscription (no API key needed)
+- Specific requirements vary by installer (see individual installer documentation)
 
 ## Container Access
 
@@ -75,11 +103,8 @@ Choose how to set up your development project:
 # Enter the container
 pct enter <container-id>
 
-# Navigate to project
+# Navigate to project (if applicable)
 cd /opt/project
-
-# Start Claude Code
-claude
 ```
 
 ### Docker Container
@@ -87,52 +112,38 @@ claude
 # Enter the container
 docker exec -it <container-name> bash
 
-# Navigate to project  
+# Navigate to project (if applicable)
 cd /opt/project
-
-# Start Claude Code
-claude
 ```
 
 ### Local Installation
 ```bash
-# Navigate to your project directory
+# Navigate to your project directory (if applicable)
 cd your-project
-
-# Start Claude Code
-claude
 ```
 
 ## Configuration
 
-After installation, configure MCP server credentials in:
-- **Local**: `~/.config/claude-code/mcp-config.json`
-- **Container**: `/root/.config/claude-code/mcp-config.json`
+Configuration varies by installer. See individual installer documentation for specific setup instructions.
 
-## Example Usage
+## Adding New Installers
 
-### Development Workflows
+To add a new installer to this collection:
+
+1. Create a new directory under `installers/` (e.g., `installers/my-app/`)
+2. Create an `install.sh` script in that directory
+3. Source the shared utilities: `source "$SCRIPT_DIR/../shared/common.sh"`
+4. Use the shared functions for UI, logging, and environment detection
+5. Update this README with installation instructions
+
+### Example Installer Structure
 ```bash
-# Start a new React project in a container
-claude "Help me set up a new React TypeScript project with best practices"
-
-# Clone and work on existing project
-claude "Help me understand this codebase and suggest improvements"
-
-# Infrastructure automation
-claude "Create a deployment script for this application"
-```
-
-### Proxmox-Specific Examples
-```bash
-# Container management
-claude "Help me create a new LXC container for this project"
-
-# API integration
-claude "Show me how to use the Proxmox API to manage VMs"
-
-# Automation scripts
-claude "Create a backup automation script for Proxmox containers"
+installers/
+└── my-app/
+    ├── install.sh          # Main installer script
+    ├── README.md           # App-specific documentation
+    └── config/             # Configuration templates (optional)
+        └── default.conf
 ```
 
 ## Cleanup
@@ -147,38 +158,19 @@ docker stop <container-name> && docker rm <container-name>
 ```
 
 ### Local Uninstall
-```bash
-~/.config/claude-code/uninstall.sh
-```
+Uninstall methods vary by installer. Check individual installer documentation.
 
 ## Troubleshooting
 
-- Check installation log: `/tmp/claude-dev-env-setup-*.log`
-- Verify Node.js: `node --version`
-- Test Claude Code: `claude --version`
-- Check MCP servers: `claude mcp list`
+- Check installation logs in `/tmp/proxmox-helper-*.log`
+- Verify environment detection with `df -h` and `which docker`
 - Container logs: `pct logs <id>` or `docker logs <name>`
-
-## Advanced Configuration
-
-### Environment Variables
-- `CLAUDE_CONFIG_DIR` - Custom config directory
-- `ANTHROPIC_MODEL` - Specify Claude model
-- `MCP_TIMEOUT` - MCP server timeout settings
-
-### Custom MCP Servers
-```bash
-# Add custom MCP servers
-claude mcp add
-
-# Import from Claude Desktop
-claude mcp add-from-claude-desktop
-```
+- For installer-specific issues, check the installer's documentation
 
 ## License
 
-This script is provided as-is for the development community.
+These scripts are provided as-is for the development community.
 
 ## Contributing
 
-Submit issues and enhancement requests through GitHub!
+Submit issues and enhancement requests through GitHub! We welcome new installer contributions.

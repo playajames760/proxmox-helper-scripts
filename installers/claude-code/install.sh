@@ -1,32 +1,18 @@
 #!/usr/bin/env bash
 
-# setup-claude-dev-env.sh - Universal Claude Code Development Environment Setup
+# install.sh - Claude Code Development Environment Setup
 # This script creates isolated Claude Code development environments with optional containerization
-# Usage: bash -c "$(curl -fsSL https://raw.githubusercontent.com/your-repo/proxmox-helper-scripts/main/setup-claude-dev-env.sh)"
+# Part of the Proxmox Helper Scripts collection
 
 set -euo pipefail
 
-# Colors and styling
-RED=$'\033[0;31m'
-GREEN=$'\033[0;32m'
-YELLOW=$'\033[1;33m'
-BLUE=$'\033[0;34m'
-MAGENTA=$'\033[0;35m'
-CYAN=$'\033[0;36m'
-WHITE=$'\033[1;37m'
-BOLD=$'\033[1m'
-DIM=$'\033[2m'
-NC=$'\033[0m' # No Color
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# Unicode characters for UI
-CHECK_MARK="✓"
-CROSS_MARK="✗"
-ARROW="➜"
-SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
-PROGRESS_FILLED="█"
-PROGRESS_EMPTY="░"
+# Source shared utilities
+source "$SCRIPT_DIR/../shared/common.sh"
 
-# Script variables
+# Script-specific variables
 SCRIPT_VERSION="1.0.0"
 CLAUDE_CODE_VERSION="latest"
 NODE_VERSION="20"
@@ -34,92 +20,9 @@ LOG_FILE="/tmp/claude-dev-env-setup-$(date +%Y%m%d-%H%M%S).log"
 CONFIG_DIR="$HOME/.config/claude-code"
 MCP_CONFIG_FILE="$CONFIG_DIR/mcp-config.json"
 
-# Spinner PID storage
-SPINNER_PID=""
-
-# Function to display fancy banner
-show_banner() {
-    clear
-    echo -e "${CYAN}${BOLD}"
-    echo "╭─────────────────────────────────────────────────────╮"
-    echo "│                                                     │"
-    echo "│  ${WHITE}🤖 Claude Code Development Environment Setup  ${CYAN}│"
-    echo "│  ${DIM}${WHITE}Fast • Secure • Containerized                 ${CYAN}│"
-    echo "│  ${DIM}${WHITE}Version ${SCRIPT_VERSION}                                 ${CYAN}│"
-    echo "│                                                     │"
-    echo "╰─────────────────────────────────────────────────────╯"
-    echo -e "${NC}"
-    echo
-}
-
-# Function to log messages
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
-}
-
-# Function to display messages with formatting
-msg_info() {
-    echo -e "${BLUE}ℹ️  ${NC}$1"
-    log "INFO: $1"
-}
-
-msg_success() {
-    echo -e "${GREEN}✅ ${NC}$1"
-    log "SUCCESS: $1"
-}
-
-msg_error() {
-    echo -e "${RED}❌ ${NC}$1"
-    log "ERROR: $1"
-}
-
-msg_warning() {
-    echo -e "${YELLOW}⚠️  ${NC}$1"
-    log "WARNING: $1"
-}
-
-msg_step() {
-    echo -e "${CYAN}🔄 ${NC}$1"
-    log "STEP: $1"
-}
-
-# Function to create spinner
-start_spinner() {
-    local message="$1"
-    (
-        while true; do
-            for frame in "${SPINNER_FRAMES[@]}"; do
-                echo -ne "\r${BLUE}${frame}${NC} ${message}"
-                sleep 0.1
-            done
-        done
-    ) &
-    SPINNER_PID=$!
-}
-
-# Function to stop spinner
-stop_spinner() {
-    if [[ -n "$SPINNER_PID" ]]; then
-        kill "$SPINNER_PID" 2>/dev/null
-        wait "$SPINNER_PID" 2>/dev/null
-        SPINNER_PID=""
-        echo -ne "\r"
-    fi
-}
-
-# Function to show progress bar
-show_progress() {
-    local current=$1
-    local total=$2
-    local width=50
-    local percentage=$((current * 100 / total))
-    local filled=$((width * current / total))
-    local empty=$((width - filled))
-    
-    echo -ne "\r["
-    printf "%${filled}s" | tr ' ' "$PROGRESS_FILLED"
-    printf "%${empty}s" | tr ' ' "$PROGRESS_EMPTY"
-    echo -ne "] ${percentage}%"
+# Function to display Claude Code specific banner
+show_claude_banner() {
+    show_banner "🤖 Claude Code Development Environment Setup" "Fast • Secure • Containerized" "$SCRIPT_VERSION"
 }
 
 # Environment detection variables
@@ -1257,7 +1160,7 @@ EOF
 # Main installation flow
 main() {
     # Show modern banner
-    show_banner
+    show_claude_banner
     
     # Status tracking
     echo -e "${DIM}📝 Installation log: $LOG_FILE${NC}"
