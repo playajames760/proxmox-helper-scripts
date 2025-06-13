@@ -149,7 +149,7 @@ detect_environments() {
     
     # Check for Proxmox VE
     if [[ -f /etc/pve/version ]] || [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]] || \
-       [[ -d /etc/pve ]] || (systemctl is-active --quiet pve-cluster 2>/dev/null || true) || \
+       [[ -d /etc/pve ]] || (systemctl is-active --quiet pve-cluster 2>/dev/null) || \
        [[ -f /etc/proxmox-release ]]; then
         IS_PROXMOX=true
         if [[ -f /etc/pve/version ]]; then
