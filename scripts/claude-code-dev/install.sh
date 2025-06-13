@@ -196,24 +196,48 @@ interactive_config() {
     msg_info "Available storage pools:"
     local pools
     pools=($(get_storage_pools))
+    
+    # Ensure we have at least one pool
+    if [[ ${#pools[@]} -eq 0 ]]; then
+        pools=("local-lvm")
+    fi
+    
     for i in "${!pools[@]}"; do
         echo "  $((i+1)). ${pools[i]}"
     done
     read -p "Select storage pool [1]: " pool_choice
     pool_choice="${pool_choice:-1}"
-    CT_STORAGE_POOL="${pools[$((pool_choice-1))]:-${pools[0]}}"
+    
+    # Validate pool choice and set default
+    if [[ $pool_choice -gt 0 && $pool_choice -le ${#pools[@]} ]]; then
+        CT_STORAGE_POOL="${pools[$((pool_choice-1))]}"
+    else
+        CT_STORAGE_POOL="${pools[0]}"
+    fi
     
     # Network bridge selection
     echo ""
     msg_info "Available network bridges:"
     local bridges
     bridges=($(get_network_bridges))
+    
+    # Ensure we have at least one bridge
+    if [[ ${#bridges[@]} -eq 0 ]]; then
+        bridges=("vmbr0")
+    fi
+    
     for i in "${!bridges[@]}"; do
         echo "  $((i+1)). ${bridges[i]}"
     done
     read -p "Select network bridge [1]: " bridge_choice
     bridge_choice="${bridge_choice:-1}"
-    CT_NET_BRIDGE="${bridges[$((bridge_choice-1))]:-${bridges[0]}}"
+    
+    # Validate bridge choice and set default
+    if [[ $bridge_choice -gt 0 && $bridge_choice -le ${#bridges[@]} ]]; then
+        CT_NET_BRIDGE="${bridges[$((bridge_choice-1))]}"
+    else
+        CT_NET_BRIDGE="${bridges[0]}"
+    fi
     
     # Features
     echo ""

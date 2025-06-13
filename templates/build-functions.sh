@@ -464,34 +464,37 @@ get_next_vmid() {
 
 get_storage_pools() {
     # Get all storage pools that support rootdir content (containers)
-    # Filter out any that are disabled or have connection issues
     local pools=()
-    while IFS= read -r line; do
-        local pool_name status
-        pool_name=$(echo "$line" | awk '{print $1}')
-        status=$(echo "$line" | awk '{print $2}')
-        
-        # Skip disabled pools or pools with connection issues
-        if [[ "$status" == "active" ]] && echo "$line" | grep -q "rootdir"; then
-            pools+=("$pool_name")
-        fi
-    done < <(pvesm status 2>/dev/null | awk 'NR>1')
     
-    # If no pools found via pvesm, fall back to manual detection
+    # First try to get pools that are actively working
+    while IFS= read -r pool_name; do
+        # Test if we can actually query this pool without errors
+        if pvesm status "$pool_name" &>/dev/null; then
+            local content
+            content=$(pvesm status "$pool_name" 2>/dev/null | awk 'NR==2 {print $6}')
+            if [[ "$content" =~ rootdir ]]; then
+                pools+=("$pool_name")
+            fi
+        fi
+    done < <(pvesm status 2>/dev/null | awk 'NR>1 {print $1}')
+    
+    # If still no pools found, ensure we at least have the common ones
     if [[ ${#pools[@]} -eq 0 ]]; then
-        # Try to detect working storage pools manually
-        for pool in local-lvm utility local; do
+        # Add known working storage types
+        for pool in local-lvm utility; do
             if pvesm status "$pool" &>/dev/null; then
-                local content
-                content=$(pvesm status "$pool" 2>/dev/null | awk 'NR==2 {print $6}')
-                if [[ "$content" =~ rootdir ]]; then
-                    pools+=("$pool")
-                fi
+                pools+=("$pool")
             fi
         done
     fi
     
-    printf '%s\n' "${pools[@]}" | head -10
+    # Output the pools, ensure we have at least one
+    if [[ ${#pools[@]} -gt 0 ]]; then
+        printf '%s\n' "${pools[@]}" | head -10
+    else
+        # Fallback - just return local-lvm as it's most common
+        echo "local-lvm"
+    fi
 }
 
 get_network_bridges() {
