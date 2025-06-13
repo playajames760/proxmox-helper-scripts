@@ -121,11 +121,19 @@ check_storage_space() {
         msg_error "Storage pool '$storage_pool' not found. Available pools: $available_pools"
     fi
     
-    # Check if storage supports rootdir content
-    local storage_content
-    storage_content=$(pvesm status 2>/dev/null | awk -v pool="$storage_pool" '$1 == pool {print $6}')
-    if [[ ! "$storage_content" =~ rootdir ]]; then
-        msg_error "Storage pool '$storage_pool' does not support containers (rootdir content). Content types: $storage_content"
+    # Check if storage supports rootdir content using storage.cfg
+    local supports_rootdir=false
+    if grep -q "^[[:alpha:]]*:.*${storage_pool}" /etc/pve/storage.cfg 2>/dev/null; then
+        local content_line
+        content_line=$(awk "/^[[:alpha:]]*:.*${storage_pool}$/{flag=1;next} flag && /content/{print;flag=0}" /etc/pve/storage.cfg 2>/dev/null)
+        if [[ "$content_line" =~ rootdir ]]; then
+            supports_rootdir=true
+        fi
+    fi
+    
+    if [[ "$supports_rootdir" != "true" ]]; then
+        local content_display="${content_line:-"not specified"}"
+        msg_error "Storage pool '$storage_pool' does not support containers (rootdir content). Content: $content_display"
     fi
     
     # Get available space - handle different storage types
