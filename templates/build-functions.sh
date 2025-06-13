@@ -219,21 +219,39 @@ get_latest_template() {
     
     msg_info "Updating template list..."
     
-    # Update template list with timeout
-    if ! timeout 60 pveam update 2>/dev/null; then
+    # Update template list with timeout and capture output
+    local update_output
+    if ! update_output=$(timeout 60 pveam update 2>&1); then
         msg_warn "Failed to update template list, using cached list"
+    else
+        msg_ok "Template list updated"
     fi
     
     local template
     case "$os" in
         "ubuntu-22.04")
-            template=$(pveam available | grep -E "ubuntu-22\.04.*standard" | sort -V | tail -1 | awk '{print $2}')
+            # More robust template parsing - try multiple approaches
+            template=$(pveam available 2>/dev/null | grep -E "ubuntu-22\.04.*standard.*amd64" | awk '{print $2}' | sort -V | tail -1)
+            # Fallback: try without amd64 filter
+            if [[ -z "$template" ]]; then
+                template=$(pveam available 2>/dev/null | grep -E "ubuntu-22\.04.*standard" | awk '{print $2}' | sort -V | tail -1)
+            fi
+            # Fallback: use known working template name
+            if [[ -z "$template" ]]; then
+                template="ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
+            fi
             ;;
         "ubuntu-20.04")
-            template=$(pveam available | grep -E "ubuntu-20\.04.*standard" | sort -V | tail -1 | awk '{print $2}')
+            template=$(pveam available 2>/dev/null | grep -E "ubuntu-20\.04.*standard.*amd64" | awk '{print $2}' | sort -V | tail -1)
+            if [[ -z "$template" ]]; then
+                template=$(pveam available 2>/dev/null | grep -E "ubuntu-20\.04.*standard" | awk '{print $2}' | sort -V | tail -1)
+            fi
             ;;
         "debian-12")
-            template=$(pveam available | grep -E "debian-12.*standard" | sort -V | tail -1 | awk '{print $2}')
+            template=$(pveam available 2>/dev/null | grep -E "debian-12.*standard.*amd64" | awk '{print $2}' | sort -V | tail -1)
+            if [[ -z "$template" ]]; then
+                template=$(pveam available 2>/dev/null | grep -E "debian-12.*standard" | awk '{print $2}' | sort -V | tail -1)
+            fi
             ;;
         *)
             msg_error "Unsupported OS template: $os"
@@ -244,6 +262,13 @@ get_latest_template() {
         msg_error "No $os template found. Check internet connection and storage configuration."
     fi
     
+    # Validate template name format
+    if [[ ! "$template" =~ ^[a-zA-Z0-9._-]+\.tar\.(gz|xz|zst)$ ]]; then
+        msg_warn "Template name format may be unusual: $template"
+        # Don't error out, just warn - sometimes template names have unexpected formats
+    fi
+    
+    msg_info "Selected template: $template"
     echo "$template"
 }
 
@@ -254,6 +279,18 @@ download_template() {
     local template_path="${storage}:vztmpl/${template}"
     local local_path="/var/lib/vz/template/cache/${template}"
     
+    # Validate inputs
+    if [[ -z "$storage" ]]; then
+        msg_error "Storage parameter is empty"
+    fi
+    
+    if [[ -z "$template" ]]; then
+        msg_error "Template parameter is empty"
+    fi
+    
+    msg_info "Template details: storage='$storage', template='$template'"
+    msg_info "Local path will be: $local_path"
+    
     # Check if template already exists
     if [[ -f "$local_path" ]]; then
         msg_ok "Template already available: $template"
@@ -262,6 +299,10 @@ download_template() {
     fi
     
     msg_info "Downloading template: $template"
+    
+    # Show available templates for debugging
+    msg_info "Available templates for debugging:"
+    pveam available 2>/dev/null | grep -E "ubuntu-22\.04.*standard" | head -3 >&2
     
     # Download with timeout and better error handling
     local download_output
