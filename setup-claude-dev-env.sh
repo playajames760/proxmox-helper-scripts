@@ -136,6 +136,9 @@ SSH_PASSWORD=""
 SSH_PORT=""
 CONTAINER_IP_CONFIG=""
 
+# Storage configuration
+SELECTED_STORAGE=""
+
 # Function to detect available environments
 detect_environments() {
     msg_info "Detecting available environments..."
@@ -641,6 +644,66 @@ EOF
     msg_success "MCP configuration saved to $MCP_CONFIG_FILE"
 }
 
+# Function to select storage pool
+select_storage_pool() {
+    msg_info "Selecting storage pool..."
+    
+    # Get available storage pools
+    local storage_list
+    storage_list=$(pvesh get /storage --output-format json 2>/dev/null | jq -r '.[] | select(.type == "lvm" or .type == "zfspool" or .type == "dir") | .storage' 2>/dev/null)
+    
+    # Fallback if jq is not available
+    if [[ -z "$storage_list" ]] || ! command -v jq &> /dev/null; then
+        storage_list=$(pvesh get /storage 2>/dev/null | grep -E "lvm|zfspool|dir" | awk '{print $1}' | grep -v "Type")
+    fi
+    
+    # If still no storage found, try basic approach
+    if [[ -z "$storage_list" ]]; then
+        storage_list="local-lvm local"
+    fi
+    
+    # Convert to array for easier handling
+    local storage_array=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && storage_array+=("$line")
+    done <<< "$storage_list"
+    
+    if [[ ${#storage_array[@]} -eq 0 ]]; then
+        msg_error "No suitable storage pools found"
+        SELECTED_STORAGE="local-lvm"
+        msg_warning "Using default storage: $SELECTED_STORAGE"
+        return 0
+    fi
+    
+    # If only one storage available, use it automatically
+    if [[ ${#storage_array[@]} -eq 1 ]]; then
+        SELECTED_STORAGE="${storage_array[0]}"
+        msg_success "Using available storage: $SELECTED_STORAGE"
+        return 0
+    fi
+    
+    # Multiple storage options - let user choose
+    echo
+    echo "Available storage pools:"
+    for i in "${!storage_array[@]}"; do
+        echo "  $((i+1))) ${storage_array[i]}"
+    done
+    echo
+    
+    while true; do
+        read -p "Select storage pool [1]: " storage_choice
+        storage_choice=${storage_choice:-1}
+        
+        if [[ "$storage_choice" =~ ^[0-9]+$ ]] && [[ "$storage_choice" -ge 1 ]] && [[ "$storage_choice" -le "${#storage_array[@]}" ]]; then
+            SELECTED_STORAGE="${storage_array[$((storage_choice-1))]}"
+            msg_success "Selected storage: $SELECTED_STORAGE"
+            break
+        else
+            msg_error "Invalid choice. Please enter a number between 1 and ${#storage_array[@]}"
+        fi
+    done
+}
+
 # Function to gather SSH configuration
 gather_ssh_config() {
     echo
@@ -735,6 +798,9 @@ gather_ssh_config() {
 create_proxmox_container() {
     msg_info "Creating Proxmox LXC container for Claude Code development..."
     
+    # Select storage pool
+    select_storage_pool
+    
     # Gather SSH configuration
     gather_ssh_config
     
@@ -805,6 +871,7 @@ create_proxmox_container() {
     
     # Create container
     msg_info "Creating container ${vmid} with hostname ${hostname}..."
+    msg_info "Storage: ${SELECTED_STORAGE}"
     msg_info "Network config: name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG}"
     
     # Try container creation with proper error handling
@@ -814,8 +881,8 @@ create_proxmox_container() {
         --memory 2048 \
         --swap 1024 \
         --net0 "name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG}" \
-        --storage local-lvm \
-        --rootfs local-lvm:8 \
+        --storage "$SELECTED_STORAGE" \
+        --rootfs "${SELECTED_STORAGE}:8" \
         --unprivileged 1 \
         --features keyctl=1,nesting=1,fuse=1 \
         --ostype ubuntu \
@@ -831,8 +898,8 @@ create_proxmox_container() {
             --memory 2048 \
             --swap 1024 \
             --net0 "name=eth0,bridge=vmbr0,ip=dhcp" \
-            --storage local-lvm \
-            --rootfs local-lvm:8 \
+            --storage "$SELECTED_STORAGE" \
+            --rootfs "${SELECTED_STORAGE}:8" \
             --unprivileged 1 \
             --features keyctl=1,nesting=1,fuse=1 \
             --ostype ubuntu \
