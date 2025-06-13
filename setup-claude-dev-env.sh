@@ -715,7 +715,7 @@ gather_ssh_config() {
     
     case $ip_choice in
         1)
-            CONTAINER_IP_CONFIG="dhcp"
+            CONTAINER_IP_CONFIG="ip=dhcp"
             msg_info "Container will use DHCP"
             ;;
         2)
