@@ -651,24 +651,56 @@ create_proxmox_container() {
     msg_info "Finding available Ubuntu template..."
     pveam update
     
-    # Try to find Ubuntu 22.04 or 20.04 template
-    local available_templates
-    available_templates=$(pveam available --section system | grep ubuntu | grep -E "(22\.04|20\.04)" | head -1)
+    # List available templates and find Ubuntu
+    msg_info "Checking available templates..."
+    local template_list
+    template_list=$(pveam available --section system 2>/dev/null | grep -i ubuntu | head -5)
     
-    if [[ -n "$available_templates" ]]; then
-        template_file=$(echo "$available_templates" | awk '{print $2}')
-        template="local:vztmpl/${template_file}"
-        
-        # Check if template exists locally, download if needed
-        if ! [[ -f "/var/lib/vz/template/cache/${template_file}" ]]; then
-            msg_info "Downloading LXC template: ${template_file}"
-            pveam download local "$template_file"
-        else
-            msg_success "Template already available: ${template_file}"
+    if [[ -z "$template_list" ]]; then
+        msg_error "No Ubuntu templates found in repository"
+        msg_info "Available templates:"
+        pveam available --section system | head -10
+        exit 1
+    fi
+    
+    # Try common Ubuntu template patterns
+    local template_candidates=(
+        "ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
+        "ubuntu-20.04-standard_20.04.1-1_amd64.tar.gz"
+        "ubuntu-22.04-standard_22.04-1_amd64.tar.gz"
+        "ubuntu-20.04-standard_20.04-1_amd64.tar.gz"
+    )
+    
+    for candidate in "${template_candidates[@]}"; do
+        if echo "$template_list" | grep -q "$candidate"; then
+            template_file="$candidate"
+            break
+        fi
+    done
+    
+    # If no specific match, use the first Ubuntu template found
+    if [[ -z "$template_file" ]]; then
+        template_file=$(echo "$template_list" | head -1 | awk '{print $2}')
+        if [[ -z "$template_file" ]]; then
+            msg_error "Could not parse template name from available list"
+            msg_info "Available Ubuntu templates:"
+            echo "$template_list"
+            exit 1
+        fi
+    fi
+    
+    template="local:vztmpl/${template_file}"
+    msg_success "Selected template: ${template_file}"
+    
+    # Check if template exists locally, download if needed
+    if ! [[ -f "/var/lib/vz/template/cache/${template_file}" ]]; then
+        msg_info "Downloading LXC template: ${template_file}"
+        if ! pveam download local "$template_file"; then
+            msg_error "Failed to download template: ${template_file}"
+            exit 1
         fi
     else
-        msg_error "No Ubuntu 22.04 or 20.04 template found"
-        exit 1
+        msg_success "Template already available: ${template_file}"
     fi
     
     # Create container
