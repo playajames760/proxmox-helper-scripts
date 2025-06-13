@@ -227,13 +227,13 @@ get_latest_template() {
     local template
     case "$os" in
         "ubuntu-22.04")
-            template=$(pveam available "$storage" | grep -E "ubuntu-22\.04.*standard" | sort -V | tail -1 | awk '{print $2}')
+            template=$(pveam available | grep -E "ubuntu-22\.04.*standard" | sort -V | tail -1 | awk '{print $2}')
             ;;
         "ubuntu-20.04")
-            template=$(pveam available "$storage" | grep -E "ubuntu-20\.04.*standard" | sort -V | tail -1 | awk '{print $2}')
+            template=$(pveam available | grep -E "ubuntu-20\.04.*standard" | sort -V | tail -1 | awk '{print $2}')
             ;;
         "debian-12")
-            template=$(pveam available "$storage" | grep -E "debian-12.*standard" | sort -V | tail -1 | awk '{print $2}')
+            template=$(pveam available | grep -E "debian-12.*standard" | sort -V | tail -1 | awk '{print $2}')
             ;;
         *)
             msg_error "Unsupported OS template: $os"
