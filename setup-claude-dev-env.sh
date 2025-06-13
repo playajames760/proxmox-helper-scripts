@@ -40,20 +40,14 @@ SPINNER_PID=""
 # Function to display fancy banner
 show_banner() {
     clear
-    echo -e "${CYAN}"
-    echo "╔═════════════════════════════════════════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                                                     ║"
-    echo "║  ${BOLD}${WHITE}   ____  _                   _         ____             _                ${CYAN}    ║"
-    echo "║  ${BOLD}${WHITE}  / __ \| |                 | |       / __ \           | |               ${CYAN}    ║"
-    echo "║  ${BOLD}${WHITE} | /  \/| | __ _ _   _  ____ | | ___  | /  \/ ___   ___| | ___           ${CYAN}    ║"
-    echo "║  ${BOLD}${WHITE} | |    | |/ _\` | | | |/ _  || |/ _ \ | |    / _ \ / _  | |/ _ \        ${CYAN}    ║"
-    echo "║  ${BOLD}${WHITE} | \__/\| | (_| | |_| | (_| || |  __/ | \__/\ (_) | (_| | |  __/         ${CYAN}    ║"
-    echo "║  ${BOLD}${WHITE}  \____/|_|\__,_|\__,_|\__,_||_|\___|  \____/\___/ \__,_|_|\___|         ${CYAN}    ║"
-    echo "║                                                                                                     ║"
-    echo "║  ${MAGENTA}              🚀 Universal Claude Code Environment Setup 🚀                  ${CYAN}    ║"
-    echo "║  ${DIM}${WHITE}                        Version ${SCRIPT_VERSION}                         ${CYAN}    ║"
-    echo "║                                                                                                     ║"
-    echo "╚═════════════════════════════════════════════════════════════════════════════════════════════════════╝"
+    echo -e "${CYAN}${BOLD}"
+    echo "  ╭─────────────────────────────────────────────────────────────╮"
+    echo "  │                                                             │"
+    echo "  │  ${WHITE}🤖 Claude Code ${CYAN}Development Environment Setup         │"
+    echo "  │  ${DIM}${WHITE}   Fast • Secure • Containerized                      ${CYAN}  │"
+    echo "  │  ${DIM}${WHITE}   Version ${SCRIPT_VERSION}                                    ${CYAN}  │"
+    echo "  │                                                             │"
+    echo "  ╰─────────────────────────────────────────────────────────────╯"
     echo -e "${NC}"
     echo
 }
@@ -65,23 +59,28 @@ log() {
 
 # Function to display messages with formatting
 msg_info() {
-    echo -e "${BLUE}${ARROW}${NC} $1"
+    echo -e "${BLUE}ℹ️  ${NC}$1"
     log "INFO: $1"
 }
 
 msg_success() {
-    echo -e "${GREEN}${CHECK_MARK}${NC} $1"
+    echo -e "${GREEN}✅ ${NC}$1"
     log "SUCCESS: $1"
 }
 
 msg_error() {
-    echo -e "${RED}${CROSS_MARK}${NC} $1"
+    echo -e "${RED}❌ ${NC}$1"
     log "ERROR: $1"
 }
 
 msg_warning() {
-    echo -e "${YELLOW}!${NC} $1"
+    echo -e "${YELLOW}⚠️  ${NC}$1"
     log "WARNING: $1"
+}
+
+msg_step() {
+    echo -e "${CYAN}🔄 ${NC}$1"
+    log "STEP: $1"
 }
 
 # Function to create spinner
@@ -141,7 +140,9 @@ SELECTED_STORAGE=""
 
 # Function to detect available environments
 detect_environments() {
-    msg_info "Detecting available environments..."
+    msg_step "Environment discovery"
+    
+    local detected=()
     
     # Check for Proxmox VE
     if [[ -f /etc/pve/version ]] || [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]] || \
@@ -150,225 +151,270 @@ detect_environments() {
         IS_PROXMOX=true
         if [[ -f /etc/pve/version ]]; then
             PVE_VERSION=$(cat /etc/pve/version)
-            msg_success "Detected Proxmox VE ${PVE_VERSION}"
+            detected+=("📦 Proxmox VE $PVE_VERSION")
         else
-            msg_success "Detected Proxmox VE environment"
+            detected+=("📦 Proxmox VE")
         fi
     fi
     
     # Check for Docker
-    if command -v docker &> /dev/null && docker info &> /dev/null; then
+    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
         HAS_DOCKER=true
         DOCKER_VERSION=$(docker --version | cut -d' ' -f3 | tr -d ',')
-        msg_success "Detected Docker ${DOCKER_VERSION}"
+        detected+=("🐳 Docker $DOCKER_VERSION")
     fi
     
-    if [[ "$IS_PROXMOX" == "false" ]] && [[ "$HAS_DOCKER" == "false" ]]; then
-        msg_info "Local installation will be used (no containerization available)"
+    # Always available
+    detected+=("💻 Local system")
+    
+    if [[ ${#detected[@]} -eq 1 ]]; then
+        msg_success "Available: ${detected[0]}"
+    else
+        echo -e "${GREEN}✅ Detected environments:${NC}"
+        for env in "${detected[@]}"; do
+            echo -e "  $env"
+        done
     fi
+}
+
+# Function to display modern interactive menu
+show_menu() {
+    local title="$1"
+    local subtitle="$2"
+    shift 2
+    local options=("$@")
+    
+    echo
+    echo -e "${CYAN}${BOLD}$title${NC}"
+    if [[ -n "$subtitle" ]]; then
+        echo -e "${DIM}$subtitle${NC}"
+    fi
+    echo
+    
+    for option in "${options[@]}"; do
+        echo -e "$option"
+    done
+    echo
 }
 
 # Function to display environment selection menu
 select_environment() {
-    echo
-    msg_info "Select development environment:"
-    echo
-    
     local options=()
     local env_types=()
+    local menu_items=()
     
     # Always offer local installation
-    options+=("1" "Local Installation (current system)")
+    options+=("1")
     env_types+=("local")
+    menu_items+=("${CYAN}💻 [1]${NC} ${WHITE}Local Installation${NC} ${DIM}(install on current system)${NC}")
     
     # Add Proxmox option if available
     if [[ "$IS_PROXMOX" == "true" ]]; then
-        options+=("2" "Proxmox LXC Container (isolated)")
+        local next_num=$((${#options[@]} + 1))
+        options+=("$next_num")
         env_types+=("proxmox")
+        menu_items+=("${GREEN}📦 [$next_num]${NC} ${WHITE}Proxmox LXC Container${NC} ${DIM}(isolated environment)${NC}")
     fi
     
     # Add Docker option if available
     if [[ "$HAS_DOCKER" == "true" ]]; then
-        if [[ "$IS_PROXMOX" == "true" ]]; then
-            options+=("3" "Docker Container (portable)")
-        else
-            options+=("2" "Docker Container (portable)")
-        fi
+        local next_num=$((${#options[@]} + 1))
+        options+=("$next_num")
         env_types+=("docker")
+        menu_items+=("${BLUE}🐳 [$next_num]${NC} ${WHITE}Docker Container${NC} ${DIM}(portable environment)${NC}")
     fi
     
-    # Use whiptail if available, otherwise simple menu
-    if command -v whiptail &> /dev/null; then
-        local choice
-        choice=$(whiptail --title "Environment Selection" --menu "Choose your development environment:" 15 60 4 "${options[@]}" 3>&1 1>&2 2>&3)
-        if [[ $? -ne 0 ]]; then
-            msg_error "Installation cancelled"
-            exit 1
-        fi
-        ENVIRONMENT_TYPE="${env_types[$((choice-1))]}"
-    else
-        echo "Available options:"
-        for ((i=0; i<${#options[@]}; i+=2)); do
-            echo "  ${options[i]}) ${options[i+1]}"
-        done
-        echo
-        read -p "Enter your choice [1]: " choice
+    show_menu "🚀 Choose Development Environment" "Select where you want to install Claude Code" "${menu_items[@]}"
+    
+    while true; do
+        read -p "$(echo -e "${BOLD}Enter your choice [1]:${NC} ")" choice
         choice=${choice:-1}
         
-        if [[ "$choice" -lt 1 ]] || [[ "$choice" -gt $((${#options[@]}/2)) ]]; then
-            msg_error "Invalid choice"
-            exit 1
-        fi
+        # Find the choice in options array
+        local found=false
+        for i in "${!options[@]}"; do
+            if [[ "${options[i]}" == "$choice" ]]; then
+                ENVIRONMENT_TYPE="${env_types[i]}"
+                found=true
+                break
+            fi
+        done
         
-        ENVIRONMENT_TYPE="${env_types[$((choice-1))]}"
-    fi
-    
-    msg_success "Selected environment: $ENVIRONMENT_TYPE"
+        if [[ "$found" == "true" ]]; then
+            local env_icon=""
+            case "$ENVIRONMENT_TYPE" in
+                "local") env_icon="💻" ;;
+                "proxmox") env_icon="📦" ;;
+                "docker") env_icon="🐳" ;;
+            esac
+            msg_success "Selected: $env_icon $ENVIRONMENT_TYPE environment"
+            break
+        else
+            msg_error "Invalid choice. Please enter a number from the menu."
+        fi
+    done
 }
 
 # Function to display project mode selection
 select_project_mode() {
-    echo
-    msg_info "Select project setup mode:"
-    echo
-    
-    local options=(
-        "1" "New Project (start fresh)"
-        "2" "Clone Existing Repository"
-        "3" "Setup in Current Directory"
+    local menu_items=(
+        "${GREEN}📁 [1]${NC} ${WHITE}New Project${NC} ${DIM}(create fresh project directory)${NC}"
+        "${BLUE}📥 [2]${NC} ${WHITE}Clone Repository${NC} ${DIM}(git clone existing project)${NC}"
+        "${YELLOW}📂 [3]${NC} ${WHITE}Current Directory${NC} ${DIM}(use $(basename "$PWD"))${NC}"
     )
     
-    # Use whiptail if available, otherwise simple menu
-    if command -v whiptail &> /dev/null; then
-        local choice
-        choice=$(whiptail --title "Project Mode Selection" --menu "Choose your project setup:" 15 60 3 "${options[@]}" 3>&1 1>&2 2>&3)
-        if [[ $? -ne 0 ]]; then
-            msg_error "Installation cancelled"
-            exit 1
-        fi
-        case $choice in
-            1) PROJECT_MODE="new" ;;
-            2) PROJECT_MODE="clone" ;;
-            3) PROJECT_MODE="current" ;;
-        esac
-    else
-        echo "Available options:"
-        for ((i=0; i<${#options[@]}; i+=2)); do
-            echo "  ${options[i]}) ${options[i+1]}"
-        done
-        echo
-        read -p "Enter your choice [3]: " choice
+    show_menu "📋 Choose Project Setup" "How do you want to set up your project?" "${menu_items[@]}"
+    
+    while true; do
+        read -p "$(echo -e "${BOLD}Enter your choice [3]:${NC} ")" choice
         choice=${choice:-3}
         
         case $choice in
-            1) PROJECT_MODE="new" ;;
-            2) PROJECT_MODE="clone" ;;
-            3) PROJECT_MODE="current" ;;
-            *) msg_error "Invalid choice"; exit 1 ;;
+            1) 
+                PROJECT_MODE="new"
+                msg_success "Selected: 📁 New project setup"
+                break
+                ;;
+            2) 
+                PROJECT_MODE="clone"
+                msg_success "Selected: 📥 Clone existing repository"
+                break
+                ;;
+            3) 
+                PROJECT_MODE="current"
+                msg_success "Selected: 📂 Use current directory"
+                break
+                ;;
+            *) 
+                msg_error "Invalid choice. Please enter 1, 2, or 3."
+                ;;
         esac
-    fi
+    done
+}
+
+# Function to show installation progress
+show_progress_step() {
+    local step=$1
+    local total=$2
+    local description=$3
     
-    msg_success "Selected project mode: $PROJECT_MODE"
+    local percentage=$((step * 100 / total))
+    local bar_length=30
+    local filled=$((bar_length * step / total))
+    
+    echo -ne "\r${CYAN}Progress: ["
+    printf "%${filled}s" | tr ' ' '█'
+    printf "%$((bar_length - filled))s" | tr ' ' '░'
+    echo -ne "] ${percentage}% ${description}${NC}"
+    
+    if [[ $step -eq $total ]]; then
+        echo
+    fi
 }
 
 # Function to check system requirements
 check_requirements() {
-    msg_info "Checking system requirements..."
+    msg_step "System compatibility check"
+    
+    # Quick checks with minimal output
+    local checks=0
+    local total_checks=4
     
     # Check if running as root
+    ((checks++))
+    show_progress_step $checks $total_checks "Checking permissions..."
     if [[ $EUID -eq 0 ]]; then
-        msg_warning "Running as root. Claude Code will be installed system-wide."
+        echo -e "\n${YELLOW}ℹ️  Running as root - will install system-wide${NC}"
     fi
     
     # Check architecture
+    ((checks++))
+    show_progress_step $checks $total_checks "Verifying architecture..."
     ARCH=$(uname -m)
     case $ARCH in
-        x86_64|amd64)
-            msg_success "Architecture: $ARCH"
-            ;;
+        x86_64|amd64) ;;
         *)
-            msg_error "Unsupported architecture: $ARCH"
+            echo
+            msg_error "Unsupported architecture: $ARCH (need x86_64/amd64)"
             exit 1
             ;;
     esac
     
-    # Check available disk space (need at least 2GB)
+    # Check available disk space
+    ((checks++))
+    show_progress_step $checks $total_checks "Checking disk space..."
     AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
     if [[ $AVAILABLE_SPACE -lt 2 ]]; then
-        msg_error "Insufficient disk space. At least 2GB required."
+        echo
+        msg_error "Need at least 2GB disk space (${AVAILABLE_SPACE}GB available)"
         exit 1
     fi
-    msg_success "Disk space: ${AVAILABLE_SPACE}GB available"
     
     # Check internet connectivity
-    if ping -c 1 -W 3 google.com &> /dev/null; then
-        msg_success "Internet connectivity: OK"
-    else
-        msg_error "No internet connectivity detected"
+    ((checks++))
+    show_progress_step $checks $total_checks "Testing connectivity..."
+    if ! ping -c 1 -W 3 google.com &> /dev/null; then
+        echo
+        msg_error "No internet connection detected"
         exit 1
     fi
+    
+    echo
+    msg_success "System ready: $ARCH, ${AVAILABLE_SPACE}GB available"
 }
 
 # Function to install Node.js
 install_nodejs() {
-    msg_info "Checking Node.js installation..."
+    msg_step "Setting up Node.js runtime"
     
     if command -v node &> /dev/null; then
         NODE_INSTALLED_VERSION=$(node -v | sed 's/v//')
-        msg_success "Node.js ${NODE_INSTALLED_VERSION} already installed"
+        msg_success "Node.js $NODE_INSTALLED_VERSION detected"
         
-        # Check if npm is installed
+        # Ensure npm is available
         if ! command -v npm &> /dev/null; then
-            msg_warning "npm not found, installing..."
+            echo -ne "${BLUE}Installing npm...${NC}"
             apt-get update -qq && apt-get install -y npm &>> "$LOG_FILE"
+            echo -e "\r${GREEN}✅ npm installed${NC}"
         fi
         return 0
     fi
     
-    msg_info "Installing Node.js ${NODE_VERSION}.x..."
-    start_spinner "Downloading Node.js setup script..."
+    echo -e "${BLUE}📦 Installing Node.js ${NODE_VERSION}.x...${NC}"
     
-    # Install Node.js via NodeSource repository
-    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - &>> "$LOG_FILE"
-    stop_spinner
-    
-    start_spinner "Installing Node.js and npm..."
-    apt-get install -y nodejs &>> "$LOG_FILE"
-    stop_spinner
-    
-    if command -v node &> /dev/null; then
+    # Install Node.js with minimal output
+    if curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - &>> "$LOG_FILE" && \
+       apt-get install -y nodejs &>> "$LOG_FILE"; then
         NODE_INSTALLED_VERSION=$(node -v)
-        msg_success "Node.js ${NODE_INSTALLED_VERSION} installed successfully"
+        msg_success "Node.js $NODE_INSTALLED_VERSION ready"
     else
-        msg_error "Failed to install Node.js"
+        msg_error "Node.js installation failed (check $LOG_FILE)"
         exit 1
     fi
 }
 
 # Function to install Claude Code
 install_claude_code() {
-    msg_info "Installing Claude Code..."
+    msg_step "Installing Claude Code CLI"
     
     # Check if already installed
     if command -v claude &> /dev/null; then
-        INSTALLED_VERSION=$(claude --version 2>/dev/null || echo "unknown")
-        msg_warning "Claude Code ${INSTALLED_VERSION} is already installed"
-        read -p "Reinstall/Update? (y/N) " -n 1 -r
+        INSTALLED_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "${YELLOW}⚠️  Claude Code already installed: $INSTALLED_VERSION${NC}"
+        read -p "$(echo -e "${BOLD}Update to latest version? (y/N):${NC} ")" -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            msg_success "Using existing Claude Code installation"
             return 0
         fi
     fi
     
-    start_spinner "Installing Claude Code globally..."
-    npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} &>> "$LOG_FILE"
-    stop_spinner
-    
-    if command -v claude &> /dev/null; then
-        msg_success "Claude Code installed successfully"
-        claude --version
+    echo -e "${BLUE}🚀 Installing Claude Code CLI...${NC}"
+    if npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} &>> "$LOG_FILE"; then
+        INSTALLED_VERSION=$(claude --version 2>/dev/null | head -1 || echo "installed")
+        msg_success "Claude Code ready: $INSTALLED_VERSION"
     else
-        msg_error "Failed to install Claude Code"
+        msg_error "Claude Code installation failed (check $LOG_FILE)"
         exit 1
     fi
 }
@@ -394,68 +440,54 @@ MCP_SERVERS=(
 # Function to display MCP server selection menu
 select_mcp_servers() {
     echo
-    echo -e "${BOLD}${CYAN}Select MCP Servers to Install:${NC}"
-    echo -e "${DIM}Use space to select/deselect, Enter to confirm${NC}"
+    echo -e "${CYAN}${BOLD}🔧 MCP Server Selection${NC}"
+    echo -e "${DIM}Choose integrations for your Claude Code environment${NC}"
     echo
     
-    # Create array for dialog
-    local options=()
-    local descriptions=()
-    for key in "${!MCP_SERVERS[@]}"; do
-        IFS='|' read -r name desc <<< "${MCP_SERVERS[$key]}"
-        options+=("$key" "$name" "off")
-        descriptions["$key"]="$desc"
-    done
+    echo -e "${GREEN}${BOLD}📦 Recommended (auto-selected):${NC}"
+    echo -e "  ${GREEN}✓${NC} GitHub Integration ${DIM}(repos, issues, PRs)${NC}"
+    echo -e "  ${GREEN}✓${NC} Filesystem Operations ${DIM}(file management)${NC}"  
+    echo -e "  ${GREEN}✓${NC} Context7 Documentation ${DIM}(up-to-date docs)${NC}"
     
-    # Sort options
-    IFS=$'\n' sorted=($(sort <<<"${options[*]}"))
-    unset IFS
+    if [[ "$IS_PROXMOX" == "true" ]]; then
+        echo -e "  ${GREEN}✓${NC} Proxmox Integration ${DIM}(VM/container management)${NC}"
+    fi
+    echo
     
-    # Use whiptail if available, otherwise basic select
-    if command -v whiptail &> /dev/null; then
-        SELECTED_SERVERS=$(whiptail --title "MCP Server Selection" \
-            --checklist "Select MCP servers to install:" 20 78 12 \
-            "github" "GitHub MCP Server (recommended)" ON \
-            "filesystem" "Filesystem MCP (recommended)" ON \
-            "context7" "Context7 Documentation (recommended)" ON \
-            "proxmox" "Proxmox API Integration" ON \
-            "terraform" "Terraform Infrastructure" OFF \
-            "aws" "AWS Cloud Services" OFF \
-            "mongodb" "MongoDB Database" OFF \
-            "supabase" "Supabase Backend" OFF \
-            "postman" "Postman API Testing" OFF \
-            "obsidian" "Obsidian Notes" OFF \
-            "notion" "Notion Documentation" OFF \
-            "mentor" "AI Code Review" OFF \
-            "perplexity" "Enhanced Search" OFF \
-            3>&1 1>&2 2>&3)
-    else
-        # Fallback to basic selection
-        echo "Select servers (space-separated numbers):"
-        local i=1
-        for key in github filesystem context7 proxmox terraform aws mongodb supabase postman obsidian notion mentor perplexity; do
-            IFS='|' read -r name desc <<< "${MCP_SERVERS[$key]}"
-            echo "  $i) $name - $desc"
-            ((i++))
-        done
-        read -p "Enter selections (e.g., 1 2 3): " selections
-        
-        # Convert selections to server keys
-        SELECTED_SERVERS=""
-        local server_array=(github filesystem context7 proxmox terraform aws mongodb supabase postman obsidian notion mentor perplexity)
-        for num in $selections; do
-            if [[ $num -ge 1 && $num -le ${#server_array[@]} ]]; then
-                SELECTED_SERVERS+="${server_array[$((num-1))]} "
-            fi
+    echo -e "${YELLOW}${BOLD}⚡ Optional Integrations:${NC}"
+    echo -e "  ${CYAN}[1]${NC} AWS Cloud Services ${DIM}(EC2, S3, etc.)${NC}"
+    echo -e "  ${CYAN}[2]${NC} Terraform Infrastructure ${DIM}(IaC automation)${NC}"
+    echo -e "  ${CYAN}[3]${NC} MongoDB Database ${DIM}(NoSQL operations)${NC}"
+    echo -e "  ${CYAN}[4]${NC} Supabase Backend ${DIM}(BaaS integration)${NC}"
+    echo -e "  ${CYAN}[5]${NC} AI Code Review ${DIM}(Deepseek mentor)${NC}"
+    echo -e "  ${CYAN}[6]${NC} Enhanced Search ${DIM}(Perplexity API)${NC}"
+    echo
+    
+    # Auto-select recommended servers
+    SELECTED_SERVERS="github filesystem context7"
+    if [[ "$IS_PROXMOX" == "true" ]]; then
+        SELECTED_SERVERS+=" proxmox"
+    fi
+    
+    read -p "$(echo -e "${BOLD}Add optional integrations? (enter numbers like '1 5 6', or press Enter to skip):${NC} ")" optional_choices
+    
+    if [[ -n "$optional_choices" ]]; then
+        for choice in $optional_choices; do
+            case $choice in
+                1) SELECTED_SERVERS+=" aws" ;;
+                2) SELECTED_SERVERS+=" terraform" ;;
+                3) SELECTED_SERVERS+=" mongodb" ;;
+                4) SELECTED_SERVERS+=" supabase" ;;
+                5) SELECTED_SERVERS+=" mentor" ;;
+                6) SELECTED_SERVERS+=" perplexity" ;;
+                *) msg_warning "Unknown option: $choice" ;;
+            esac
         done
     fi
     
-    if [[ -z "$SELECTED_SERVERS" ]]; then
-        msg_warning "No MCP servers selected. You can add them later using 'claude mcp add'"
-        return 0
-    fi
-    
-    msg_success "Selected MCP servers: ${SELECTED_SERVERS}"
+    # Count selected servers
+    local server_count=$(echo $SELECTED_SERVERS | wc -w)
+    msg_success "Selected $server_count MCP integrations: $SELECTED_SERVERS"
 }
 
 # Function to configure MCP servers
@@ -1162,27 +1194,37 @@ test_installation() {
 # Function to show post-installation instructions
 show_instructions() {
     echo
-    echo -e "${BOLD}${GREEN}🎉 Installation Complete! 🎉${NC}"
+    echo -e "${GREEN}${BOLD}🎉 Claude Code Environment Ready!${NC}"
     echo
-    echo -e "${CYAN}${BOLD}Next Steps:${NC}"
-    echo -e "1. ${YELLOW}Configure MCP server credentials:${NC}"
-    echo -e "   Edit: ${BLUE}$MCP_CONFIG_FILE${NC}"
+    
+    # Quick start section
+    echo -e "${CYAN}${BOLD}🚀 Quick Start:${NC}"
+    echo -e "  ${GREEN}claude${NC}                    ${DIM}# Start Claude Code${NC}"
+    echo -e "  ${GREEN}claude --help${NC}             ${DIM}# Show available options${NC}"
     echo
-    echo -e "2. ${YELLOW}Start using Claude Code:${NC}"
-    echo -e "   ${GREEN}claude${NC} - Start interactive session"
-    echo -e "   ${GREEN}claude --help${NC} - Show all options"
-    echo -e "   ${GREEN}claude mcp add${NC} - Add more MCP servers"
-    echo
-    echo -e "3. ${YELLOW}For Proxmox development:${NC}"
-    echo -e "   ${GREEN}claude \"Help me create a Proxmox LXC container\"${NC}"
-    echo -e "   ${GREEN}claude \"Show me the Proxmox API documentation\"${NC}"
-    echo
-    echo -e "${CYAN}${BOLD}Important Configuration:${NC}"
-    echo -e "- Claude Code config: ${BLUE}~/.config/claude-code/${NC}"
-    echo -e "- MCP servers config: ${BLUE}$MCP_CONFIG_FILE${NC}"
-    echo -e "- Log file: ${BLUE}$LOG_FILE${NC}"
-    echo
-    echo -e "${DIM}For more information, visit: https://claude.ai/code${NC}"
+    
+    # Configuration section (only if servers were selected)
+    if [[ -n "$SELECTED_SERVERS" ]]; then
+        echo -e "${YELLOW}${BOLD}⚙️  Next: Configure API Keys${NC}"
+        echo -e "  ${BLUE}$MCP_CONFIG_FILE${NC}"
+        echo -e "  ${DIM}# Add your API tokens for selected integrations${NC}"
+        echo
+    fi
+    
+    # Environment-specific info
+    if [[ "$ENVIRONMENT_TYPE" != "local" ]]; then
+        echo -e "${MAGENTA}${BOLD}📦 Container Access:${NC}"
+        if [[ "$ENVIRONMENT_TYPE" == "proxmox" ]]; then
+            echo -e "  ${GREEN}pct enter ${VMID:-<container-id>}${NC}    ${DIM}# Direct console access${NC}"
+            echo -e "  ${GREEN}ssh root@<container-ip>${NC}        ${DIM}# Remote SSH access${NC}"
+        else
+            echo -e "  ${GREEN}docker exec -it <container> bash${NC} ${DIM}# Access container${NC}"
+        fi
+        echo
+    fi
+    
+    echo -e "${DIM}📚 Documentation: ${BLUE}https://claude.ai/code${NC}"
+    echo -e "${DIM}📋 Log file: ${BLUE}$LOG_FILE${NC}"
     echo
 }
 
@@ -1202,61 +1244,65 @@ EOF
 
 # Main installation flow
 main() {
-    # Show banner
+    # Show modern banner
     show_banner
     
-    # Initial setup
-    msg_info "Starting Claude Code development environment setup..."
-    msg_info "Log file: $LOG_FILE"
+    # Status tracking
+    echo -e "${DIM}📝 Installation log: $LOG_FILE${NC}"
     echo
     
-    # Detect available environments
+    # Pre-flight checks
     detect_environments
     check_requirements
     echo
     
-    # Environment and project mode selection
+    # Interactive setup
     select_environment
     select_project_mode
     echo
     
-    # Handle different environment types
+    # Installation phase
+    local env_icon=""
+    case "$ENVIRONMENT_TYPE" in
+        "local") env_icon="💻" ;;
+        "proxmox") env_icon="📦" ;;
+        "docker") env_icon="🐳" ;;
+    esac
+    
+    echo -e "${CYAN}${BOLD}🛠️  Installing in $env_icon $ENVIRONMENT_TYPE environment${NC}"
+    echo
+    
+    # Environment-specific installation
     case "$ENVIRONMENT_TYPE" in
         "local")
-            msg_info "Setting up local development environment..."
             setup_local_project
             install_nodejs
             install_claude_code
+            echo
+            
+            # MCP Configuration
+            select_mcp_servers
+            if [[ -n "$SELECTED_SERVERS" ]]; then
+                msg_step "Configuring MCP integrations"
+                configure_mcp_servers > /dev/null
+                msg_success "MCP servers configured"
+            fi
+            
+            # Create uninstall script
+            create_uninstall_script
             ;;
+            
         "proxmox")
-            msg_info "Setting up Proxmox LXC container environment..."
             create_proxmox_container
-            # Container setup includes Node.js and Claude Code installation
             ;;
+            
         "docker")
-            msg_info "Setting up Docker container environment..."
             create_docker_container
-            # Container setup includes Node.js and Claude Code installation
             ;;
     esac
+    
+    # Final status
     echo
-    
-    # Configure MCP servers (for local installs)
-    if [[ "$ENVIRONMENT_TYPE" == "local" ]]; then
-        select_mcp_servers
-        if [[ -n "$SELECTED_SERVERS" ]]; then
-            configure_mcp_servers
-        fi
-        echo
-        
-        # Test installation
-        test_installation
-        
-        # Create uninstall script
-        create_uninstall_script
-    fi
-    
-    # Show completion message
     show_instructions
 }
 
