@@ -129,6 +129,13 @@ HAS_DOCKER=false
 ENVIRONMENT_TYPE=""
 PROJECT_MODE=""
 
+# SSH configuration variables
+SSH_AUTH_METHOD=""
+SSH_PUBLIC_KEY=""
+SSH_PASSWORD=""
+SSH_PORT=""
+CONTAINER_IP_CONFIG=""
+
 # Function to detect available environments
 detect_environments() {
     msg_info "Detecting available environments..."
@@ -634,9 +641,98 @@ EOF
     msg_success "MCP configuration saved to $MCP_CONFIG_FILE"
 }
 
+# Function to gather SSH configuration
+gather_ssh_config() {
+    echo
+    msg_info "SSH Configuration Setup"
+    echo
+    
+    # SSH Key or Password
+    echo "Choose SSH authentication method:"
+    echo "1) SSH Key (recommended)"
+    echo "2) Password authentication"
+    read -p "Enter choice [1]: " ssh_choice
+    ssh_choice=${ssh_choice:-1}
+    
+    case $ssh_choice in
+        1)
+            SSH_AUTH_METHOD="key"
+            echo
+            echo "SSH Key Setup Options:"
+            echo "1) Use existing SSH key from ~/.ssh/id_rsa.pub"
+            echo "2) Provide SSH key manually"
+            read -p "Enter choice [1]: " key_choice
+            key_choice=${key_choice:-1}
+            
+            case $key_choice in
+                1)
+                    if [[ -f ~/.ssh/id_rsa.pub ]]; then
+                        SSH_PUBLIC_KEY=$(cat ~/.ssh/id_rsa.pub)
+                        msg_success "Using SSH key from ~/.ssh/id_rsa.pub"
+                    elif [[ -f ~/.ssh/id_ed25519.pub ]]; then
+                        SSH_PUBLIC_KEY=$(cat ~/.ssh/id_ed25519.pub)
+                        msg_success "Using SSH key from ~/.ssh/id_ed25519.pub"
+                    else
+                        msg_warning "No SSH key found in ~/.ssh/"
+                        echo "Please paste your SSH public key:"
+                        read -r SSH_PUBLIC_KEY
+                    fi
+                    ;;
+                2)
+                    echo "Please paste your SSH public key:"
+                    read -r SSH_PUBLIC_KEY
+                    ;;
+            esac
+            ;;
+        2)
+            SSH_AUTH_METHOD="password"
+            while true; do
+                read -s -p "Enter password for root user: " ssh_password
+                echo
+                read -s -p "Confirm password: " ssh_password_confirm
+                echo
+                if [[ "$ssh_password" == "$ssh_password_confirm" ]]; then
+                    SSH_PASSWORD="$ssh_password"
+                    break
+                else
+                    msg_error "Passwords don't match. Please try again."
+                fi
+            done
+            ;;
+    esac
+    
+    # SSH Port
+    read -p "SSH port [22]: " ssh_port
+    SSH_PORT=${ssh_port:-22}
+    
+    # Container IP configuration
+    echo
+    echo "Container network configuration:"
+    echo "1) DHCP (automatic IP)"
+    echo "2) Static IP"
+    read -p "Enter choice [1]: " ip_choice
+    ip_choice=${ip_choice:-1}
+    
+    case $ip_choice in
+        1)
+            CONTAINER_IP_CONFIG="dhcp"
+            msg_info "Container will use DHCP"
+            ;;
+        2)
+            read -p "Enter static IP (e.g., 192.168.1.100/24): " static_ip
+            read -p "Enter gateway IP (e.g., 192.168.1.1): " gateway_ip
+            CONTAINER_IP_CONFIG="ip=${static_ip},gw=${gateway_ip}"
+            msg_info "Container will use static IP: $static_ip"
+            ;;
+    esac
+}
+
 # Function to create Proxmox LXC container
 create_proxmox_container() {
     msg_info "Creating Proxmox LXC container for Claude Code development..."
+    
+    # Gather SSH configuration
+    gather_ssh_config
     
     # Get next available container ID
     local vmid
@@ -710,7 +806,7 @@ create_proxmox_container() {
         --hostname "$hostname" \
         --memory 2048 \
         --swap 1024 \
-        --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+        --net0 name=eth0,bridge=vmbr0,${CONTAINER_IP_CONFIG} \
         --storage local-lvm \
         --rootfs local-lvm:8 \
         --unprivileged 1 \
@@ -726,7 +822,37 @@ create_proxmox_container() {
     # Update and install basic packages
     msg_info "Setting up container environment..."
     pct exec "$vmid" -- apt-get update
-    pct exec "$vmid" -- apt-get install -y curl wget git sudo whiptail
+    pct exec "$vmid" -- apt-get install -y curl wget git sudo whiptail openssh-server
+    
+    # Configure SSH
+    msg_info "Configuring SSH access..."
+    pct exec "$vmid" -- systemctl enable ssh
+    pct exec "$vmid" -- systemctl start ssh
+    
+    # Configure SSH port if not default
+    if [[ "$SSH_PORT" != "22" ]]; then
+        pct exec "$vmid" -- sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
+        pct exec "$vmid" -- systemctl restart ssh
+    fi
+    
+    # Setup authentication
+    case "$SSH_AUTH_METHOD" in
+        "key")
+            msg_info "Setting up SSH key authentication..."
+            pct exec "$vmid" -- mkdir -p /root/.ssh
+            pct exec "$vmid" -- bash -c "echo '$SSH_PUBLIC_KEY' > /root/.ssh/authorized_keys"
+            pct exec "$vmid" -- chmod 600 /root/.ssh/authorized_keys
+            pct exec "$vmid" -- chmod 700 /root/.ssh
+            pct exec "$vmid" -- sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+            pct exec "$vmid" -- systemctl restart ssh
+            ;;
+        "password")
+            msg_info "Setting up password authentication..."
+            pct exec "$vmid" -- bash -c "echo 'root:$SSH_PASSWORD' | chpasswd"
+            pct exec "$vmid" -- sed -i 's/#PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            pct exec "$vmid" -- systemctl restart ssh
+            ;;
+    esac
     
     # Install Node.js and Claude Code inside container
     msg_info "Installing Node.js in container..."
@@ -739,12 +865,33 @@ create_proxmox_container() {
     # Setup project directory based on mode
     setup_project_in_container "$vmid"
     
+    # Get container IP address
+    local container_ip
+    container_ip=$(pct exec "$vmid" -- hostname -I | awk '{print $1}')
+    
     msg_success "Proxmox container ${vmid} created successfully!"
     echo
-    msg_info "Access your development environment:"
-    echo "  pct enter ${vmid}"
-    echo "  cd /opt/project"
-    echo "  claude"
+    msg_info "Development environment ready!"
+    echo
+    msg_info "SSH Access Information:"
+    if [[ "$SSH_AUTH_METHOD" == "key" ]]; then
+        echo "  ssh root@${container_ip} -p ${SSH_PORT}"
+        msg_info "SSH key authentication configured"
+    else
+        echo "  ssh root@${container_ip} -p ${SSH_PORT}"
+        msg_info "Password authentication configured"
+    fi
+    echo
+    msg_info "Alternative access methods:"
+    echo "  Proxmox console: pct enter ${vmid}"
+    echo "  Project directory: /opt/project"
+    echo "  Start Claude Code: claude"
+    echo
+    msg_info "Container Details:"
+    echo "  Container ID: ${vmid}"
+    echo "  Hostname: ${hostname}"
+    echo "  IP Address: ${container_ip}"
+    echo "  SSH Port: ${SSH_PORT}"
 }
 
 # Function to create Docker container
