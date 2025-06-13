@@ -263,19 +263,15 @@ download_template() {
     
     msg_info "Downloading template: $template"
     
-    # Download with progress and timeout
-    {
-        timeout 900 pveam download "$storage" "$template" 2>&1 | while read -r line; do
-            if [[ $line =~ ([0-9]+)% ]]; then
-                echo "Download progress: ${BASH_REMATCH[1]}%"
-            fi
-        done
-    } &
-    
-    local download_pid=$!
-    
-    if ! show_spinner $download_pid "Downloading $template"; then
-        msg_error "Failed to download template: $template"
+    # Download with timeout and better error handling
+    local download_output
+    if ! download_output=$(timeout 900 pveam download "$storage" "$template" 2>&1); then
+        local exit_code=$?
+        if [[ $exit_code -eq 124 ]]; then
+            msg_error "Template download timed out after 15 minutes: $template"
+        else
+            msg_error "Template download failed: $template. Error: $download_output"
+        fi
     fi
     
     # Verify download
