@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# setup-claude-proxmox-dev.sh - Claude Code Development Environment Setup for Proxmox
-# This script sets up Claude Code with essential MCP servers optimized for Proxmox development
-# Usage: bash -c "$(curl -fsSL https://raw.githubusercontent.com/your-repo/proxmox-helper-scripts/main/setup-claude-proxmox-dev.sh)"
+# setup-claude-dev-env.sh - Universal Claude Code Development Environment Setup
+# This script creates isolated Claude Code development environments with optional containerization
+# Usage: bash -c "$(curl -fsSL https://raw.githubusercontent.com/your-repo/proxmox-helper-scripts/main/setup-claude-dev-env.sh)"
 
 set -euo pipefail
 
@@ -30,7 +30,7 @@ PROGRESS_EMPTY="░"
 SCRIPT_VERSION="1.0.0"
 CLAUDE_CODE_VERSION="latest"
 NODE_VERSION="20"
-LOG_FILE="/tmp/claude-proxmox-setup-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="/tmp/claude-dev-env-setup-$(date +%Y%m%d-%H%M%S).log"
 CONFIG_DIR="$HOME/.config/claude-code"
 MCP_CONFIG_FILE="$CONFIG_DIR/mcp-config.json"
 
@@ -50,7 +50,7 @@ show_banner() {
     echo "║  ${BOLD}${WHITE} | \__/\| | (_| | |_| | (_| || |  __/ | \__/\ (_) | (_| | |  __/          ${CYAN}    ║"
     echo "║  ${BOLD}${WHITE}  \____/|_|\__,_|\__,_|\__,_||_|\___|  \____/\___/ \__,_|_|\___|          ${CYAN}    ║"
     echo "║                                                                              ║"
-    echo "║  ${MAGENTA}              🚀 Proxmox Development Environment Setup 🚀                  ${CYAN}   ║"
+    echo "║  ${MAGENTA}              🚀 Universal Claude Code Environment Setup 🚀                ${CYAN}   ║"
     echo "║  ${DIM}${WHITE}                        Version ${SCRIPT_VERSION}                            ${CYAN}      ║"
     echo "║                                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════════════════════╝"
@@ -123,38 +123,142 @@ show_progress() {
     echo -ne "] ${percentage}%"
 }
 
-# Function to check if running on Proxmox VE
-check_proxmox() {
-    msg_info "Checking Proxmox VE environment..."
+# Environment detection variables
+IS_PROXMOX=false
+HAS_DOCKER=false
+ENVIRONMENT_TYPE=""
+PROJECT_MODE=""
+
+# Function to detect available environments
+detect_environments() {
+    msg_info "Detecting available environments..."
     
-    # Check multiple indicators of Proxmox VE
-    if [[ -f /etc/pve/version ]]; then
-        PVE_VERSION=$(cat /etc/pve/version)
-        msg_success "Detected Proxmox VE ${PVE_VERSION}"
-        return 0
-    elif [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]]; then
-        msg_success "Detected Proxmox VE (pvesh found)"
-        return 0
-    elif [[ -d /etc/pve ]] || [[ -f /etc/pve/.version ]]; then
-        msg_success "Detected Proxmox VE (config directory found)"
-        return 0
-    elif systemctl is-active --quiet pve-cluster 2>/dev/null; then
-        msg_success "Detected Proxmox VE (pve-cluster service running)"
-        return 0
-    elif [[ -f /etc/proxmox-release ]]; then
-        PVE_VERSION=$(cat /etc/proxmox-release)
-        msg_success "Detected Proxmox VE"
-        return 0
-    else
-        msg_warning "This doesn't appear to be a Proxmox VE host"
-        echo -e "${YELLOW}This script is optimized for Proxmox VE but can run on other Debian-based systems.${NC}"
-        read -p "Continue anyway? (y/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    # Check for Proxmox VE
+    if [[ -f /etc/pve/version ]] || [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]] || \
+       [[ -d /etc/pve ]] || systemctl is-active --quiet pve-cluster 2>/dev/null || \
+       [[ -f /etc/proxmox-release ]]; then
+        IS_PROXMOX=true
+        if [[ -f /etc/pve/version ]]; then
+            PVE_VERSION=$(cat /etc/pve/version)
+            msg_success "Detected Proxmox VE ${PVE_VERSION}"
+        else
+            msg_success "Detected Proxmox VE environment"
+        fi
+    fi
+    
+    # Check for Docker
+    if command -v docker &> /dev/null && docker info &> /dev/null; then
+        HAS_DOCKER=true
+        DOCKER_VERSION=$(docker --version | cut -d' ' -f3 | tr -d ',')
+        msg_success "Detected Docker ${DOCKER_VERSION}"
+    fi
+    
+    if [[ "$IS_PROXMOX" == "false" ]] && [[ "$HAS_DOCKER" == "false" ]]; then
+        msg_info "Local installation will be used (no containerization available)"
+    fi
+}
+
+# Function to display environment selection menu
+select_environment() {
+    echo
+    msg_info "Select development environment:"
+    echo
+    
+    local options=()
+    local env_types=()
+    
+    # Always offer local installation
+    options+=("1" "Local Installation (current system)")
+    env_types+=("local")
+    
+    # Add Proxmox option if available
+    if [[ "$IS_PROXMOX" == "true" ]]; then
+        options+=("2" "Proxmox LXC Container (isolated)")
+        env_types+=("proxmox")
+    fi
+    
+    # Add Docker option if available
+    if [[ "$HAS_DOCKER" == "true" ]]; then
+        if [[ "$IS_PROXMOX" == "true" ]]; then
+            options+=("3" "Docker Container (portable)")
+        else
+            options+=("2" "Docker Container (portable)")
+        fi
+        env_types+=("docker")
+    fi
+    
+    # Use whiptail if available, otherwise simple menu
+    if command -v whiptail &> /dev/null; then
+        local choice
+        choice=$(whiptail --title "Environment Selection" --menu "Choose your development environment:" 15 60 4 "${options[@]}" 3>&1 1>&2 2>&3)
+        if [[ $? -ne 0 ]]; then
             msg_error "Installation cancelled"
             exit 1
         fi
+        ENVIRONMENT_TYPE="${env_types[$((choice-1))]}"
+    else
+        echo "Available options:"
+        for ((i=0; i<${#options[@]}; i+=2)); do
+            echo "  ${options[i]}) ${options[i+1]}"
+        done
+        echo
+        read -p "Enter your choice [1]: " choice
+        choice=${choice:-1}
+        
+        if [[ "$choice" -lt 1 ]] || [[ "$choice" -gt $((${#options[@]}/2)) ]]; then
+            msg_error "Invalid choice"
+            exit 1
+        fi
+        
+        ENVIRONMENT_TYPE="${env_types[$((choice-1))]}"
     fi
+    
+    msg_success "Selected environment: $ENVIRONMENT_TYPE"
+}
+
+# Function to display project mode selection
+select_project_mode() {
+    echo
+    msg_info "Select project setup mode:"
+    echo
+    
+    local options=(
+        "1" "New Project (start fresh)"
+        "2" "Clone Existing Repository"
+        "3" "Setup in Current Directory"
+    )
+    
+    # Use whiptail if available, otherwise simple menu
+    if command -v whiptail &> /dev/null; then
+        local choice
+        choice=$(whiptail --title "Project Mode Selection" --menu "Choose your project setup:" 15 60 3 "${options[@]}" 3>&1 1>&2 2>&3)
+        if [[ $? -ne 0 ]]; then
+            msg_error "Installation cancelled"
+            exit 1
+        fi
+        case $choice in
+            1) PROJECT_MODE="new" ;;
+            2) PROJECT_MODE="clone" ;;
+            3) PROJECT_MODE="current" ;;
+        esac
+    else
+        echo "Available options:"
+        for ((i=0; i<${#options[@]}; i+=2)); do
+            echo "  ${options[i]}) ${options[i+1]}"
+        done
+        echo
+        read -p "Enter your choice [3]: " choice
+        choice=${choice:-3}
+        
+        case $choice in
+            1) PROJECT_MODE="new" ;;
+            2) PROJECT_MODE="clone" ;;
+            3) PROJECT_MODE="current" ;;
+            *) msg_error "Invalid choice"; exit 1 ;;
+        esac
+    fi
+    
+    msg_success "Selected project mode: $PROJECT_MODE"
 }
 
 # Function to check system requirements
@@ -530,6 +634,173 @@ EOF
     msg_success "MCP configuration saved to $MCP_CONFIG_FILE"
 }
 
+# Function to create Proxmox LXC container
+create_proxmox_container() {
+    msg_info "Creating Proxmox LXC container for Claude Code development..."
+    
+    # Get next available container ID
+    local vmid
+    vmid=$(pvesh get /cluster/nextid 2>/dev/null || echo "100")
+    
+    # Container configuration
+    local hostname="claude-dev-${vmid}"
+    local template="local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.gz"
+    
+    # Check if template exists, download if needed
+    if ! [[ -f "/var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.gz" ]]; then
+        msg_info "Downloading Ubuntu 22.04 LXC template..."
+        pveam update
+        pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.gz
+    fi
+    
+    # Create container
+    msg_info "Creating container ${vmid} with hostname ${hostname}..."
+    pct create "$vmid" "$template" \
+        --cores 2 \
+        --hostname "$hostname" \
+        --memory 2048 \
+        --swap 1024 \
+        --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+        --storage local-lvm \
+        --rootfs local-lvm:8 \
+        --unprivileged 1 \
+        --features keyctl=1,nesting=1,fuse=1 \
+        --ostype ubuntu \
+        --start 1 \
+        --onboot 0
+    
+    # Wait for container to start
+    msg_info "Waiting for container to start..."
+    sleep 10
+    
+    # Update and install basic packages
+    msg_info "Setting up container environment..."
+    pct exec "$vmid" -- apt-get update
+    pct exec "$vmid" -- apt-get install -y curl wget git sudo whiptail
+    
+    # Install Node.js and Claude Code inside container
+    msg_info "Installing Node.js in container..."
+    pct exec "$vmid" -- bash -c "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+    pct exec "$vmid" -- apt-get install -y nodejs
+    
+    msg_info "Installing Claude Code in container..."
+    pct exec "$vmid" -- npm install -g @anthropic-ai/claude-code
+    
+    # Setup project directory based on mode
+    setup_project_in_container "$vmid"
+    
+    msg_success "Proxmox container ${vmid} created successfully!"
+    echo
+    msg_info "Access your development environment:"
+    echo "  pct enter ${vmid}"
+    echo "  cd /opt/project"
+    echo "  claude"
+}
+
+# Function to create Docker container
+create_docker_container() {
+    msg_info "Creating Docker container for Claude Code development..."
+    
+    local container_name="claude-dev-$(date +%s)"
+    local image="ubuntu:22.04"
+    
+    # Create and start container
+    msg_info "Starting Docker container..."
+    docker run -d --name "$container_name" \
+        -v "/tmp:/tmp" \
+        -w "/opt/project" \
+        "$image" \
+        tail -f /dev/null
+    
+    # Install dependencies
+    msg_info "Setting up container environment..."
+    docker exec "$container_name" apt-get update
+    docker exec "$container_name" apt-get install -y curl wget git sudo nodejs npm
+    
+    # Install Claude Code
+    msg_info "Installing Claude Code in container..."
+    docker exec "$container_name" npm install -g @anthropic-ai/claude-code
+    
+    # Setup project based on mode
+    setup_project_in_container "$container_name" "docker"
+    
+    msg_success "Docker container ${container_name} created successfully!"
+    echo
+    msg_info "Access your development environment:"
+    echo "  docker exec -it ${container_name} bash"
+    echo "  cd /opt/project"
+    echo "  claude"
+}
+
+# Function to setup project in container
+setup_project_in_container() {
+    local container_id="$1"
+    local container_type="${2:-proxmox}"
+    
+    case "$PROJECT_MODE" in
+        "new")
+            if [[ "$container_type" == "docker" ]]; then
+                docker exec "$container_id" mkdir -p /opt/project
+            else
+                pct exec "$container_id" -- mkdir -p /opt/project
+            fi
+            msg_success "New project directory created in container"
+            ;;
+        "clone")
+            read -p "Enter Git repository URL: " repo_url
+            if [[ -n "$repo_url" ]]; then
+                if [[ "$container_type" == "docker" ]]; then
+                    docker exec "$container_id" bash -c "cd /opt && git clone '$repo_url' project"
+                else
+                    pct exec "$container_id" -- bash -c "cd /opt && git clone '$repo_url' project"
+                fi
+                msg_success "Repository cloned in container"
+            fi
+            ;;
+        "current")
+            # Copy current directory to container
+            local temp_archive="/tmp/project-$(date +%s).tar.gz"
+            tar -czf "$temp_archive" -C "$(dirname "$PWD")" "$(basename "$PWD")"
+            
+            if [[ "$container_type" == "docker" ]]; then
+                docker cp "$temp_archive" "$container_id:/tmp/"
+                docker exec "$container_id" bash -c "cd /opt && tar -xzf /tmp/$(basename "$temp_archive") && mv '$(basename "$PWD")' project"
+            else
+                pct push "$container_id" "$temp_archive" "/tmp/$(basename "$temp_archive")"
+                pct exec "$container_id" -- bash -c "cd /opt && tar -xzf /tmp/$(basename "$temp_archive") && mv '$(basename "$PWD")' project"
+            fi
+            
+            rm -f "$temp_archive"
+            msg_success "Current project copied to container"
+            ;;
+    esac
+}
+
+# Function to setup local project
+setup_local_project() {
+    case "$PROJECT_MODE" in
+        "new")
+            read -p "Enter project name [claude-project]: " project_name
+            project_name=${project_name:-claude-project}
+            mkdir -p "$project_name"
+            cd "$project_name"
+            msg_success "New project directory created: $project_name"
+            ;;
+        "clone")
+            read -p "Enter Git repository URL: " repo_url
+            if [[ -n "$repo_url" ]]; then
+                git clone "$repo_url"
+                local repo_name=$(basename "$repo_url" .git)
+                cd "$repo_name"
+                msg_success "Repository cloned: $repo_name"
+            fi
+            ;;
+        "current")
+            msg_success "Using current directory: $(pwd)"
+            ;;
+    esac
+}
+
 # Function to test Claude Code installation
 test_installation() {
     echo
@@ -598,35 +869,55 @@ main() {
     show_banner
     
     # Initial setup
-    msg_info "Starting Claude Code setup for Proxmox development..."
+    msg_info "Starting Claude Code development environment setup..."
     msg_info "Log file: $LOG_FILE"
     echo
     
-    # Check environment
-    check_proxmox
+    # Detect available environments
+    detect_environments
     check_requirements
     echo
     
-    # Install dependencies
-    install_nodejs
+    # Environment and project mode selection
+    select_environment
+    select_project_mode
     echo
     
-    # Install Claude Code
-    install_claude_code
+    # Handle different environment types
+    case "$ENVIRONMENT_TYPE" in
+        "local")
+            msg_info "Setting up local development environment..."
+            setup_local_project
+            install_nodejs
+            install_claude_code
+            ;;
+        "proxmox")
+            msg_info "Setting up Proxmox LXC container environment..."
+            create_proxmox_container
+            # Container setup includes Node.js and Claude Code installation
+            ;;
+        "docker")
+            msg_info "Setting up Docker container environment..."
+            create_docker_container
+            # Container setup includes Node.js and Claude Code installation
+            ;;
+    esac
     echo
     
-    # Configure MCP servers
-    select_mcp_servers
-    if [[ -n "$SELECTED_SERVERS" ]]; then
-        configure_mcp_servers
+    # Configure MCP servers (for local installs)
+    if [[ "$ENVIRONMENT_TYPE" == "local" ]]; then
+        select_mcp_servers
+        if [[ -n "$SELECTED_SERVERS" ]]; then
+            configure_mcp_servers
+        fi
+        echo
+        
+        # Test installation
+        test_installation
+        
+        # Create uninstall script
+        create_uninstall_script
     fi
-    echo
-    
-    # Test installation
-    test_installation
-    
-    # Create uninstall script
-    create_uninstall_script
     
     # Show completion message
     show_instructions
