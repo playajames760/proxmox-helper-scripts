@@ -7,16 +7,16 @@
 set -euo pipefail
 
 # Colors and styling
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m' # No Color
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+MAGENTA=$'\033[0;35m'
+CYAN=$'\033[0;36m'
+WHITE=$'\033[1;37m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+NC=$'\033[0m' # No Color
 
 # Unicode characters for UI
 CHECK_MARK="✓"
@@ -127,9 +127,19 @@ show_progress() {
 check_proxmox() {
     msg_info "Checking Proxmox VE environment..."
     
+    # Check multiple indicators of Proxmox VE
     if [[ -f /etc/pve/version ]]; then
         PVE_VERSION=$(cat /etc/pve/version)
         msg_success "Detected Proxmox VE ${PVE_VERSION}"
+        return 0
+    elif [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]]; then
+        msg_success "Detected Proxmox VE (pvesh found)"
+        return 0
+    elif [[ -d /etc/pve ]] || [[ -f /etc/pve/.version ]]; then
+        msg_success "Detected Proxmox VE (config directory found)"
+        return 0
+    elif systemctl is-active --quiet pve-cluster 2>/dev/null; then
+        msg_success "Detected Proxmox VE (pve-cluster service running)"
         return 0
     elif [[ -f /etc/proxmox-release ]]; then
         PVE_VERSION=$(cat /etc/proxmox-release)
