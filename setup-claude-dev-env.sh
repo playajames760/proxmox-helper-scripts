@@ -724,6 +724,12 @@ gather_ssh_config() {
             echo "SSH Key Setup Options:"
             echo "1) Use existing SSH key from ~/.ssh/id_rsa.pub"
             echo "2) Provide SSH key manually"
+            echo
+            echo -e "${CYAN}💡 Tip: Find your SSH key on your local machine:${NC}"
+            echo -e "   ${DIM}Linux/macOS:${NC} ls ~/.ssh/*.pub"
+            echo -e "   ${DIM}Windows:${NC}    dir %USERPROFILE%\\.ssh\\*.pub"
+            echo -e "   ${DIM}Copy key:${NC}    cat ~/.ssh/id_rsa.pub (Linux) or type %USERPROFILE%\\.ssh\\id_rsa.pub (Windows)"
+            echo
             read -p "Enter choice [1]: " key_choice
             key_choice=${key_choice:-1}
             
@@ -737,11 +743,21 @@ gather_ssh_config() {
                         msg_success "Using SSH key from /root/.ssh/id_ed25519.pub"
                     else
                         msg_warning "No SSH key found in /root/.ssh/"
+                        echo
+                        echo -e "${YELLOW}🔑 Generate a new SSH key on your local machine:${NC}"
+                        echo -e "   ${DIM}Command:${NC} ssh-keygen -t rsa -b 4096 -C \"your_email@example.com\""
+                        echo -e "   ${DIM}Then run:${NC} cat ~/.ssh/id_rsa.pub (Linux/macOS) or type %USERPROFILE%\\.ssh\\id_rsa.pub (Windows)"
+                        echo
                         echo "Please paste your SSH public key:"
                         read -r SSH_PUBLIC_KEY
                     fi
                     ;;
                 2)
+                    echo
+                    echo -e "${YELLOW}📋 How to copy your SSH public key:${NC}"
+                    echo -e "   ${DIM}Linux/macOS:${NC} cat ~/.ssh/id_rsa.pub | pbcopy (macOS) or cat ~/.ssh/id_rsa.pub | xclip -selection clipboard (Linux)"
+                    echo -e "   ${DIM}Windows:${NC}    type %USERPROFILE%\\.ssh\\id_rsa.pub | clip"
+                    echo
                     echo "Please paste your SSH public key:"
                     read -r SSH_PUBLIC_KEY
                     ;;
