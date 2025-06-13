@@ -294,7 +294,8 @@ download_template() {
     # Check if template already exists
     if [[ -f "$local_path" ]]; then
         msg_ok "Template already available: $template"
-        echo "$template_path"
+        # Return local path for existing templates
+        echo "local:vztmpl/$template"
         return 0
     fi
     
@@ -321,7 +322,8 @@ download_template() {
     fi
     
     msg_ok "Template downloaded: $template"
-    echo "$template_path"
+    # Return local path format for newly downloaded templates
+    echo "local:vztmpl/$template"
 }
 
 # ===============================
