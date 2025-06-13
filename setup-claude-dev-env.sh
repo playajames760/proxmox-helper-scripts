@@ -664,23 +664,9 @@ select_storage_pool() {
     # Get available storage pools with error handling
     local storage_list=""
     
-    # Try with jq first
-    if command -v jq &> /dev/null; then
-        msg_info "Querying storage pools with JSON parsing..."
-        storage_list=$(pvesh get /storage --output-format json 2>/dev/null | jq -r '.[] | select(.type == "lvm" or .type == "zfspool" or .type == "dir") | .storage' 2>/dev/null || true)
-    fi
-    
-    # Fallback without jq
-    if [[ -z "$storage_list" ]]; then
-        msg_info "Fallback: Querying storage pools with text parsing..."
-        storage_list=$(pvesh get /storage 2>/dev/null | grep -E "lvm|zfspool|dir" | awk '{print $1}' | grep -v "Type" || true)
-    fi
-    
-    # If still no storage found, try basic pvesh command
-    if [[ -z "$storage_list" ]]; then
-        msg_info "Fallback: Trying basic storage query..."
-        storage_list=$(pvesh get /storage 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
-    fi
+    # Use the working method we discovered
+    msg_info "Querying storage pools..."
+    storage_list=$(pvesh get /storage 2>/dev/null | grep -o '[a-zA-Z][a-zA-Z0-9_-]*' | grep -v storage || true)
     
     # Final fallback to common storage names
     if [[ -z "$storage_list" ]]; then
