@@ -32,11 +32,11 @@ readonly SPINNER="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 # ===============================
 
 msg_info() {
-    echo -e "${BLUE}${INFO}${NC} ${BOLD}INFO:${NC} $1"
+    echo -e "${BLUE}${INFO}${NC} ${BOLD}INFO:${NC} $1" >&2
 }
 
 msg_ok() {
-    echo -e "${GREEN}${CHECKMARK}${NC} ${BOLD}SUCCESS:${NC} $1"
+    echo -e "${GREEN}${CHECKMARK}${NC} ${BOLD}SUCCESS:${NC} $1" >&2
 }
 
 msg_error() {
@@ -45,11 +45,11 @@ msg_error() {
 }
 
 msg_warn() {
-    echo -e "${YELLOW}${WARNING}${NC} ${BOLD}WARNING:${NC} $1"
+    echo -e "${YELLOW}${WARNING}${NC} ${BOLD}WARNING:${NC} $1" >&2
 }
 
 msg_step() {
-    echo -e "${CYAN}${ARROW}${NC} ${BOLD}STEP:${NC} $1"
+    echo -e "${CYAN}${ARROW}${NC} ${BOLD}STEP:${NC} $1" >&2
 }
 
 # Enhanced spinner with process tracking
