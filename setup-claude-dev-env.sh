@@ -648,28 +648,57 @@ EOF
 select_storage_pool() {
     msg_info "Selecting storage pool..."
     
-    # Get available storage pools
-    local storage_list
-    storage_list=$(pvesh get /storage --output-format json 2>/dev/null | jq -r '.[] | select(.type == "lvm" or .type == "zfspool" or .type == "dir") | .storage' 2>/dev/null)
-    
-    # Fallback if jq is not available
-    if [[ -z "$storage_list" ]] || ! command -v jq &> /dev/null; then
-        storage_list=$(pvesh get /storage 2>/dev/null | grep -E "lvm|zfspool|dir" | awk '{print $1}' | grep -v "Type")
+    # Debug: Test basic pvesh command
+    msg_info "Testing pvesh command availability..."
+    if ! command -v pvesh &> /dev/null; then
+        msg_error "pvesh command not found"
+        SELECTED_STORAGE="local-lvm"
+        msg_warning "Using default storage: $SELECTED_STORAGE"
+        return 0
     fi
     
-    # If still no storage found, try basic approach
+    # Get available storage pools with error handling
+    local storage_list=""
+    
+    # Try with jq first
+    if command -v jq &> /dev/null; then
+        msg_info "Querying storage pools with JSON parsing..."
+        storage_list=$(pvesh get /storage --output-format json 2>/dev/null | jq -r '.[] | select(.type == "lvm" or .type == "zfspool" or .type == "dir") | .storage' 2>/dev/null || true)
+    fi
+    
+    # Fallback without jq
     if [[ -z "$storage_list" ]]; then
+        msg_info "Fallback: Querying storage pools with text parsing..."
+        storage_list=$(pvesh get /storage 2>/dev/null | grep -E "lvm|zfspool|dir" | awk '{print $1}' | grep -v "Type" || true)
+    fi
+    
+    # If still no storage found, try basic pvesh command
+    if [[ -z "$storage_list" ]]; then
+        msg_info "Fallback: Trying basic storage query..."
+        storage_list=$(pvesh get /storage 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
+    fi
+    
+    # Final fallback to common storage names
+    if [[ -z "$storage_list" ]]; then
+        msg_warning "Could not detect storage pools, using common defaults"
         storage_list="local-lvm local"
     fi
+    
+    msg_info "Storage candidates found: $storage_list"
     
     # Convert to array for easier handling
     local storage_array=()
     while IFS= read -r line; do
-        [[ -n "$line" ]] && storage_array+=("$line")
+        if [[ -n "$line" ]]; then
+            storage_array+=("$line")
+            msg_info "Added storage: $line"
+        fi
     done <<< "$storage_list"
     
+    msg_info "Total storage pools found: ${#storage_array[@]}"
+    
     if [[ ${#storage_array[@]} -eq 0 ]]; then
-        msg_error "No suitable storage pools found"
+        msg_error "No suitable storage pools found after parsing"
         SELECTED_STORAGE="local-lvm"
         msg_warning "Using default storage: $SELECTED_STORAGE"
         return 0
