@@ -648,12 +648,16 @@ EOF
 select_storage_pool() {
     msg_info "Selecting storage pool..."
     
+    # Debug: Add trap to catch exit
+    trap 'msg_error "Storage selection function exited unexpectedly at line $LINENO"' ERR
+    
     # Debug: Test basic pvesh command
     msg_info "Testing pvesh command availability..."
     if ! command -v pvesh &> /dev/null; then
         msg_error "pvesh command not found"
         SELECTED_STORAGE="local-lvm"
         msg_warning "Using default storage: $SELECTED_STORAGE"
+        trap - ERR
         return 0
     fi
     
@@ -688,12 +692,17 @@ select_storage_pool() {
     
     # Convert to array for easier handling
     local storage_array=()
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            storage_array+=("$line")
-            msg_info "Added storage: $line"
-        fi
-    done <<< "$storage_list"
+    if [[ -n "$storage_list" ]]; then
+        # Use a more robust method to convert to array
+        IFS=$'\n' read -d '' -r -a storage_array <<< "$storage_list" || true
+        
+        # Debug: show what we found
+        for storage in "${storage_array[@]}"; do
+            if [[ -n "$storage" ]]; then
+                msg_info "Added storage: $storage"
+            fi
+        done
+    fi
     
     msg_info "Total storage pools found: ${#storage_array[@]}"
     
@@ -701,6 +710,7 @@ select_storage_pool() {
         msg_error "No suitable storage pools found after parsing"
         SELECTED_STORAGE="local-lvm"
         msg_warning "Using default storage: $SELECTED_STORAGE"
+        trap - ERR
         return 0
     fi
     
@@ -708,6 +718,7 @@ select_storage_pool() {
     if [[ ${#storage_array[@]} -eq 1 ]]; then
         SELECTED_STORAGE="${storage_array[0]}"
         msg_success "Using available storage: $SELECTED_STORAGE"
+        trap - ERR
         return 0
     fi
     
@@ -731,6 +742,9 @@ select_storage_pool() {
             msg_error "Invalid choice. Please enter a number between 1 and ${#storage_array[@]}"
         fi
     done
+    
+    # Clear the error trap
+    trap - ERR
 }
 
 # Function to gather SSH configuration
