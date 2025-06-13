@@ -297,7 +297,7 @@ create_claude_container() {
     INSTALLATION_STAGE="Container Creation"
     
     # Build container configuration
-    local storage_config="${CT_STORAGE_POOL}:${CT_STORAGE}"
+    local storage_config="${CT_STORAGE_POOL}:${CT_STORAGE}G"
     local network_config="name=eth0,bridge=${CT_NET_BRIDGE},firewall=1,ip=dhcp,type=veth"
     local features="keyctl=1,nesting=1,fuse=1"
     
