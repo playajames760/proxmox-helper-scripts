@@ -134,6 +134,12 @@ variables() {
         CT_ID=$(get_next_vmid 200)
     fi
     
+    # Override with environment variables if set
+    CT_TYPE="${CT_TYPE:-$var_unprivileged}"
+    CT_CORES="${CORES:-$CT_CORES}"
+    CT_RAM="${RAM:-$CT_RAM}"
+    CT_STORAGE="${STORAGE:-$CT_STORAGE}"
+    
     # Set storage pool if not provided
     if [[ -z "${CT_STORAGE_POOL}" ]]; then
         local available_pools
@@ -147,12 +153,6 @@ variables() {
         available_bridges=($(get_network_bridges))
         CT_NET_BRIDGE="${available_bridges[0]:-vmbr0}"
     fi
-    
-    # Override with environment variables if set
-    CT_TYPE="${CT_TYPE:-$var_unprivileged}"
-    CT_CORES="${CORES:-$CT_CORES}"
-    CT_RAM="${RAM:-$CT_RAM}"
-    CT_STORAGE="${STORAGE:-$CT_STORAGE}"
 }
 
 # ===============================
