@@ -466,34 +466,55 @@ get_storage_pools() {
     # Get all storage pools that support rootdir content (containers)
     local pools=()
     
-    # First try to get pools that are actively working
-    while IFS= read -r pool_name; do
-        # Test if we can actually query this pool without errors
-        if pvesm status "$pool_name" &>/dev/null; then
-            local content
-            content=$(pvesm status "$pool_name" 2>/dev/null | awk 'NR==2 {print $6}')
-            if [[ "$content" =~ rootdir ]]; then
+    # Parse pvesm status output correctly - skip first 2 lines (headers)
+    while IFS= read -r line; do
+        # Extract pool name and status from each line
+        local pool_name status
+        pool_name=$(echo "$line" | awk '{print $1}')
+        status=$(echo "$line" | awk '{print $3}')
+        
+        # Skip empty lines and ensure we have a valid pool name
+        if [[ -n "$pool_name" && "$pool_name" != "Name" && "$status" == "active" ]]; then
+            # Check if this pool supports containers by looking at storage.cfg
+            local supports_rootdir=false
+            if grep -q "^[[:alpha:]]*:.*${pool_name}" /etc/pve/storage.cfg 2>/dev/null; then
+                local content_line
+                content_line=$(grep -A5 "^[[:alpha:]]*:.*${pool_name}" /etc/pve/storage.cfg | grep "content" | head -1)
+                if [[ "$content_line" =~ rootdir ]]; then
+                    supports_rootdir=true
+                fi
+            fi
+            
+            # Add to pools if it supports containers
+            if [[ "$supports_rootdir" == "true" ]]; then
                 pools+=("$pool_name")
             fi
         fi
-    done < <(pvesm status 2>/dev/null | awk 'NR>1 {print $1}')
+    done < <(pvesm status 2>/dev/null | tail -n +2)
     
-    # If still no pools found, ensure we at least have the common ones
+    # If no pools found via config parsing, use a more direct approach
     if [[ ${#pools[@]} -eq 0 ]]; then
-        # Add known working storage types
-        for pool in local-lvm utility; do
-            if pvesm status "$pool" &>/dev/null; then
-                pools+=("$pool")
+        # Check known storage pools that commonly support containers
+        for pool in local-lvm utility jellyfin-data frigate; do
+            # Check if pool exists and is active
+            if pvesm status 2>/dev/null | grep -q "^${pool}.*active"; then
+                # Check storage.cfg for rootdir content
+                if grep -q "^[[:alpha:]]*:.*${pool}" /etc/pve/storage.cfg 2>/dev/null; then
+                    local content_line
+                    content_line=$(grep -A5 "^[[:alpha:]]*:.*${pool}" /etc/pve/storage.cfg | grep "content" | head -1)
+                    if [[ "$content_line" =~ rootdir ]]; then
+                        pools+=("$pool")
+                    fi
+                fi
             fi
         done
     fi
     
-    # Output the pools, ensure we have at least one
-    if [[ ${#pools[@]} -gt 0 ]]; then
-        printf '%s\n' "${pools[@]}" | head -10
-    else
-        # Fallback - just return local-lvm as it's most common
+    # Ensure we return at least one working pool
+    if [[ ${#pools[@]} -eq 0 ]]; then
         echo "local-lvm"
+    else
+        printf '%s\n' "${pools[@]}" | head -10
     fi
 }
 
