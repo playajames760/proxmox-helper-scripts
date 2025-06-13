@@ -478,8 +478,9 @@ get_storage_pools() {
             # Check if this pool supports containers by looking at storage.cfg
             local supports_rootdir=false
             if grep -q "^[[:alpha:]]*:.*${pool_name}" /etc/pve/storage.cfg 2>/dev/null; then
+                # Use a more robust approach to find content line
                 local content_line
-                content_line=$(grep -A5 "^[[:alpha:]]*:.*${pool_name}" /etc/pve/storage.cfg | grep "content" | head -1)
+                content_line=$(awk "/^[[:alpha:]]*:.*${pool_name}$/{flag=1;next} flag && /content/{print;flag=0}" /etc/pve/storage.cfg 2>/dev/null)
                 if [[ "$content_line" =~ rootdir ]]; then
                     supports_rootdir=true
                 fi
@@ -498,10 +499,10 @@ get_storage_pools() {
         for pool in local-lvm utility jellyfin-data frigate; do
             # Check if pool exists and is active
             if pvesm status 2>/dev/null | grep -q "^${pool}.*active"; then
-                # Check storage.cfg for rootdir content
+                # Check storage.cfg for rootdir content using awk instead of grep -A5
                 if grep -q "^[[:alpha:]]*:.*${pool}" /etc/pve/storage.cfg 2>/dev/null; then
                     local content_line
-                    content_line=$(grep -A5 "^[[:alpha:]]*:.*${pool}" /etc/pve/storage.cfg | grep "content" | head -1)
+                    content_line=$(awk "/^[[:alpha:]]*:.*${pool}$/{flag=1;next} flag && /content/{print;flag=0}" /etc/pve/storage.cfg 2>/dev/null)
                     if [[ "$content_line" =~ rootdir ]]; then
                         pools+=("$pool")
                     fi
