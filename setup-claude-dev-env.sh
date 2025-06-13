@@ -644,13 +644,31 @@ create_proxmox_container() {
     
     # Container configuration
     local hostname="claude-dev-${vmid}"
-    local template="local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.gz"
+    local template=""
+    local template_file=""
     
-    # Check if template exists, download if needed
-    if ! [[ -f "/var/lib/vz/template/cache/ubuntu-22.04-standard_22.04-1_amd64.tar.gz" ]]; then
-        msg_info "Downloading Ubuntu 22.04 LXC template..."
-        pveam update
-        pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.gz
+    # Find available Ubuntu template
+    msg_info "Finding available Ubuntu template..."
+    pveam update
+    
+    # Try to find Ubuntu 22.04 or 20.04 template
+    local available_templates
+    available_templates=$(pveam available --section system | grep ubuntu | grep -E "(22\.04|20\.04)" | head -1)
+    
+    if [[ -n "$available_templates" ]]; then
+        template_file=$(echo "$available_templates" | awk '{print $2}')
+        template="local:vztmpl/${template_file}"
+        
+        # Check if template exists locally, download if needed
+        if ! [[ -f "/var/lib/vz/template/cache/${template_file}" ]]; then
+            msg_info "Downloading LXC template: ${template_file}"
+            pveam download local "$template_file"
+        else
+            msg_success "Template already available: ${template_file}"
+        fi
+    else
+        msg_error "No Ubuntu 22.04 or 20.04 template found"
+        exit 1
     fi
     
     # Create container
