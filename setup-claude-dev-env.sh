@@ -41,13 +41,13 @@ SPINNER_PID=""
 show_banner() {
     clear
     echo -e "${CYAN}${BOLD}"
-    echo "  ╭─────────────────────────────────────────────────────────────╮"
-    echo "  │                                                             │"
-    echo "  │  ${WHITE}🤖 Claude Code ${CYAN}Development Environment Setup         │"
-    echo "  │  ${DIM}${WHITE}   Fast • Secure • Containerized                      ${CYAN}  │"
-    echo "  │  ${DIM}${WHITE}   Version ${SCRIPT_VERSION}                                    ${CYAN}  │"
-    echo "  │                                                             │"
-    echo "  ╰─────────────────────────────────────────────────────────────╯"
+    echo "╭─────────────────────────────────────────────────────╮"
+    echo "│                                                     │"
+    echo "│  ${WHITE}🤖 Claude Code Development Environment Setup  ${CYAN}│"
+    echo "│  ${DIM}${WHITE}Fast • Secure • Containerized                 ${CYAN}│"
+    echo "│  ${DIM}${WHITE}Version ${SCRIPT_VERSION}                                 ${CYAN}│"
+    echo "│                                                     │"
+    echo "╰─────────────────────────────────────────────────────╯"
     echo -e "${NC}"
     echo
 }
@@ -146,11 +146,11 @@ detect_environments() {
     
     # Check for Proxmox VE
     if [[ -f /etc/pve/version ]] || [[ -f /usr/bin/pvesh ]] || [[ -f /usr/sbin/pvesh ]] || \
-       [[ -d /etc/pve ]] || systemctl is-active --quiet pve-cluster 2>/dev/null || \
+       [[ -d /etc/pve ]] || (systemctl is-active --quiet pve-cluster 2>/dev/null || true) || \
        [[ -f /etc/proxmox-release ]]; then
         IS_PROXMOX=true
         if [[ -f /etc/pve/version ]]; then
-            PVE_VERSION=$(cat /etc/pve/version)
+            PVE_VERSION=$(cat /etc/pve/version 2>/dev/null || echo "unknown")
             detected+=("📦 Proxmox VE $PVE_VERSION")
         else
             detected+=("📦 Proxmox VE")
@@ -158,9 +158,9 @@ detect_environments() {
     fi
     
     # Check for Docker
-    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+    if command -v docker &> /dev/null && (docker info &> /dev/null || true); then
         HAS_DOCKER=true
-        DOCKER_VERSION=$(docker --version | cut -d' ' -f3 | tr -d ',')
+        DOCKER_VERSION=$(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',' || echo "unknown")
         detected+=("🐳 Docker $DOCKER_VERSION")
     fi
     
@@ -226,33 +226,49 @@ select_environment() {
     
     show_menu "🚀 Choose Development Environment" "Select where you want to install Claude Code" "${menu_items[@]}"
     
-    while true; do
-        read -p "$(echo -e "${BOLD}Enter your choice [1]:${NC} ")" choice
-        choice=${choice:-1}
-        
-        # Find the choice in options array
-        local found=false
-        for i in "${!options[@]}"; do
-            if [[ "${options[i]}" == "$choice" ]]; then
-                ENVIRONMENT_TYPE="${env_types[i]}"
-                found=true
+    # Check if running interactively
+    if [[ ! -t 0 ]]; then
+        # Non-interactive mode - use default (local)
+        choice=1
+        msg_info "Non-interactive mode: Using default local installation"
+    else
+        # Interactive mode
+        while true; do
+            read -p "$(echo -e "${BOLD}Enter your choice [1]:${NC} ")" choice
+            choice=${choice:-1}
+            
+            # Validate choice
+            local found=false
+            for i in "${!options[@]}"; do
+                if [[ "${options[i]}" == "$choice" ]]; then
+                    found=true
+                    break
+                fi
+            done
+            
+            if [[ "$found" == "true" ]]; then
                 break
+            else
+                msg_error "Invalid choice. Please enter a number from the menu."
             fi
         done
-        
-        if [[ "$found" == "true" ]]; then
-            local env_icon=""
-            case "$ENVIRONMENT_TYPE" in
-                "local") env_icon="💻" ;;
-                "proxmox") env_icon="📦" ;;
-                "docker") env_icon="🐳" ;;
-            esac
-            msg_success "Selected: $env_icon $ENVIRONMENT_TYPE environment"
+    fi
+    
+    # Set environment type based on choice
+    for i in "${!options[@]}"; do
+        if [[ "${options[i]}" == "$choice" ]]; then
+            ENVIRONMENT_TYPE="${env_types[i]}"
             break
-        else
-            msg_error "Invalid choice. Please enter a number from the menu."
         fi
     done
+    
+    local env_icon=""
+    case "$ENVIRONMENT_TYPE" in
+        "local") env_icon="💻" ;;
+        "proxmox") env_icon="📦" ;;
+        "docker") env_icon="🐳" ;;
+    esac
+    msg_success "Selected: $env_icon $ENVIRONMENT_TYPE environment"
 }
 
 # Function to display project mode selection
@@ -265,31 +281,38 @@ select_project_mode() {
     
     show_menu "📋 Choose Project Setup" "How do you want to set up your project?" "${menu_items[@]}"
     
-    while true; do
-        read -p "$(echo -e "${BOLD}Enter your choice [3]:${NC} ")" choice
-        choice=${choice:-3}
-        
-        case $choice in
-            1) 
-                PROJECT_MODE="new"
-                msg_success "Selected: 📁 New project setup"
-                break
-                ;;
-            2) 
-                PROJECT_MODE="clone"
-                msg_success "Selected: 📥 Clone existing repository"
-                break
-                ;;
-            3) 
-                PROJECT_MODE="current"
-                msg_success "Selected: 📂 Use current directory"
-                break
-                ;;
-            *) 
-                msg_error "Invalid choice. Please enter 1, 2, or 3."
-                ;;
-        esac
-    done
+    # Check if running interactively
+    if [[ ! -t 0 ]]; then
+        # Non-interactive mode - use default (current directory)
+        choice=3
+        msg_info "Non-interactive mode: Using current directory"
+    else
+        # Interactive mode
+        while true; do
+            read -p "$(echo -e "${BOLD}Enter your choice [3]:${NC} ")" choice
+            choice=${choice:-3}
+            
+            case $choice in
+                1|2|3) break ;;
+                *) msg_error "Invalid choice. Please enter 1, 2, or 3." ;;
+            esac
+        done
+    fi
+    
+    case $choice in
+        1) 
+            PROJECT_MODE="new"
+            msg_success "Selected: 📁 New project setup"
+            ;;
+        2) 
+            PROJECT_MODE="clone"
+            msg_success "Selected: 📥 Clone existing repository"
+            ;;
+        3) 
+            PROJECT_MODE="current"
+            msg_success "Selected: 📂 Use current directory"
+            ;;
+    esac
 }
 
 # Function to show installation progress
@@ -299,68 +322,46 @@ show_progress_step() {
     local description=$3
     
     local percentage=$((step * 100 / total))
-    local bar_length=30
-    local filled=$((bar_length * step / total))
-    
-    echo -ne "\r${CYAN}Progress: ["
-    printf "%${filled}s" | tr ' ' '█'
-    printf "%$((bar_length - filled))s" | tr ' ' '░'
-    echo -ne "] ${percentage}% ${description}${NC}"
-    
-    if [[ $step -eq $total ]]; then
-        echo
-    fi
+    echo -e "${CYAN}[$step/$total] ${description}${NC}"
 }
 
 # Function to check system requirements
 check_requirements() {
     msg_step "System compatibility check"
     
-    # Quick checks with minimal output
-    local checks=0
-    local total_checks=4
-    
     # Check if running as root
-    ((checks++))
-    show_progress_step $checks $total_checks "Checking permissions..."
     if [[ $EUID -eq 0 ]]; then
-        echo -e "\n${YELLOW}ℹ️  Running as root - will install system-wide${NC}"
+        echo -e "${YELLOW}ℹ️  Running as root - will install system-wide${NC}"
     fi
     
     # Check architecture
-    ((checks++))
-    show_progress_step $checks $total_checks "Verifying architecture..."
     ARCH=$(uname -m)
     case $ARCH in
-        x86_64|amd64) ;;
+        x86_64|amd64) 
+            echo -e "${GREEN}✅ Architecture: $ARCH${NC}"
+            ;;
         *)
-            echo
             msg_error "Unsupported architecture: $ARCH (need x86_64/amd64)"
             exit 1
             ;;
     esac
     
     # Check available disk space
-    ((checks++))
-    show_progress_step $checks $total_checks "Checking disk space..."
-    AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//' || echo "0")
     if [[ $AVAILABLE_SPACE -lt 2 ]]; then
-        echo
         msg_error "Need at least 2GB disk space (${AVAILABLE_SPACE}GB available)"
         exit 1
     fi
+    echo -e "${GREEN}✅ Disk space: ${AVAILABLE_SPACE}GB available${NC}"
     
     # Check internet connectivity
-    ((checks++))
-    show_progress_step $checks $total_checks "Testing connectivity..."
     if ! ping -c 1 -W 3 google.com &> /dev/null; then
-        echo
         msg_error "No internet connection detected"
         exit 1
     fi
+    echo -e "${GREEN}✅ Internet connectivity OK${NC}"
     
-    echo
-    msg_success "System ready: $ARCH, ${AVAILABLE_SPACE}GB available"
+    msg_success "System ready for installation"
 }
 
 # Function to install Node.js
@@ -401,11 +402,19 @@ install_claude_code() {
     if command -v claude &> /dev/null; then
         INSTALLED_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
         echo -e "${YELLOW}⚠️  Claude Code already installed: $INSTALLED_VERSION${NC}"
-        read -p "$(echo -e "${BOLD}Update to latest version? (y/N):${NC} ")" -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        
+        if [[ ! -t 0 ]]; then
+            # Non-interactive mode - use existing installation
             msg_success "Using existing Claude Code installation"
             return 0
+        else
+            # Interactive mode - ask user
+            read -p "$(echo -e "${BOLD}Update to latest version? (y/N):${NC} ")" -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                msg_success "Using existing Claude Code installation"
+                return 0
+            fi
         fi
     fi
     
@@ -469,7 +478,14 @@ select_mcp_servers() {
         SELECTED_SERVERS+=" proxmox"
     fi
     
-    read -p "$(echo -e "${BOLD}Add optional integrations? (enter numbers like '1 5 6', or press Enter to skip):${NC} ")" optional_choices
+    if [[ ! -t 0 ]]; then
+        # Non-interactive mode - skip optional integrations
+        optional_choices=""
+        msg_info "Non-interactive mode: Using recommended integrations only"
+    else
+        # Interactive mode
+        read -p "$(echo -e "${BOLD}Add optional integrations? (enter numbers like '1 5 6', or press Enter to skip):${NC} ")" optional_choices
+    fi
     
     if [[ -n "$optional_choices" ]]; then
         for choice in $optional_choices; do
